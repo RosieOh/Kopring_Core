@@ -3,12 +3,14 @@ package com.site.independent.error
 import com.site.independent.error.exception.ServiceException
 import com.site.independent.type.ErrorCode
 import org.slf4j.LoggerFactory
+import org.springframework.data.mapping.PropertyReferenceException
 import org.springframework.http.ResponseEntity
 import org.springframework.http.converter.HttpMessageNotReadableException
 import org.springframework.web.HttpRequestMethodNotSupportedException
 import org.springframework.web.bind.MethodArgumentNotValidException
 import org.springframework.web.bind.annotation.ExceptionHandler
 import org.springframework.web.bind.annotation.RestControllerAdvice
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException
 import org.springframework.web.servlet.resource.NoResourceFoundException
 
 @RestControllerAdvice
@@ -32,6 +34,16 @@ class GlobalExceptionHandler {
     // JSON 파싱 실패 (예: non-null 필드 누락 시 jackson-module-kotlin이 여기서 막는다)
     @ExceptionHandler(HttpMessageNotReadableException::class)
     fun handleHttpMessageNotReadable(e: HttpMessageNotReadableException): ResponseEntity<ErrorResponse> =
+        ErrorCode.INVALID_INPUT_VALUE.toResponseEntity()
+
+    // 경로/쿼리 파라미터 타입 불일치 (예: /coupon-events/abc)
+    @ExceptionHandler(MethodArgumentTypeMismatchException::class)
+    fun handleMethodArgumentTypeMismatch(e: MethodArgumentTypeMismatchException): ResponseEntity<ErrorResponse> =
+        ErrorCode.INVALID_INPUT_VALUE.toResponseEntity()
+
+    // 페이징 정렬 기준에 없는 필드를 넣은 경우 (예: ?sort=unknown)
+    @ExceptionHandler(PropertyReferenceException::class)
+    fun handlePropertyReference(e: PropertyReferenceException): ResponseEntity<ErrorResponse> =
         ErrorCode.INVALID_INPUT_VALUE.toResponseEntity()
 
     @ExceptionHandler(NoResourceFoundException::class)
