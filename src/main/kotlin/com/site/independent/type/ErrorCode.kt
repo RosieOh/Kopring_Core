@@ -6,6 +6,8 @@ enum class ErrorCode(
     val message: String,
 ) {
     INVALID_INPUT_VALUE(400, "INVALID_INPUT_VALUE", "요청 값이 올바르지 않습니다."),
+    INVALID_COUPON_EVENT_PERIOD(400, "INVALID_COUPON_EVENT_PERIOD", "이벤트 기간이 올바르지 않습니다. 종료 시각은 시작 시각과 현재 시각보다 늦어야 합니다."),
+    INVALID_DISCOUNT_VALUE(400, "INVALID_DISCOUNT_VALUE", "할인 방식에 맞지 않는 할인 값입니다."),
     INVALID_TOKEN(401, "INVALID_TOKEN", "유효하지 않은 토큰입니다."),
     EXPIRED_TOKEN(401, "EXPIRED_TOKEN", "만료된 토큰입니다."),
     MALFORMED_TOKEN(401, "MALFORMED_TOKEN", "위/변조된 토큰입니다."),
@@ -18,9 +20,11 @@ enum class ErrorCode(
     PASSWORD_NOT_MATCH(403, "PASSWORD_NOT_MATCH", "비밀번호가 일치하지 않습니다."),
     USER_NOT_FOUND(404, "USER_NOT_FOUND", "존재하지 않는 사용자입니다."),
     ADMIN_NOT_FOUND(404, "ADMIN_NOT_FOUND", "존재하지 않는 관리자입니다."),
+    COUPON_EVENT_NOT_FOUND(404, "COUPON_EVENT_NOT_FOUND", "존재하지 않는 쿠폰 이벤트입니다."),
     RESOURCE_NOT_FOUND(404, "RESOURCE_NOT_FOUND", "요청한 리소스를 찾을 수 없습니다."),
     METHOD_NOT_ALLOWED(405, "METHOD_NOT_ALLOWED", "지원하지 않는 HTTP 메서드입니다."),
     DUPLICATE_EMAIL(409, "DUPLICATE_EMAIL", "이미 사용 중인 이메일입니다."),
+    COUPON_EVENT_ALREADY_STARTED(409, "COUPON_EVENT_ALREADY_STARTED", "이미 시작된 쿠폰 이벤트는 수정하거나 삭제할 수 없습니다."),
     INTERNAL_SERVER_ERROR(500, "INTERNAL_SERVER_ERROR", "서버 오류가 발생했습니다."),
     BIZTALK_SEND_FAIL(503, "BIZTALK_SEND_FAIL", "카카오 알림톡 전송에 실패했습니다."),
 }

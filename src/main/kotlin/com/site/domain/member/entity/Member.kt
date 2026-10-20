@@ -9,6 +9,8 @@ import jakarta.persistence.GeneratedValue
 import jakarta.persistence.GenerationType
 import jakarta.persistence.Id
 import jakarta.persistence.Table
+import org.hibernate.annotations.JdbcTypeCode
+import org.hibernate.type.SqlTypes
 
 /**
  * - data class 로 만들지 않는다: equals/hashCode/toString 자동 생성이 지연 로딩·연관관계와 충돌한다.
@@ -40,7 +42,10 @@ class Member(
     var nickname: String = nickname
         protected set
 
+    // Hibernate 6 는 MySQL 에서 @Enumerated(STRING) 을 네이티브 ENUM 컬럼으로 만든다.
+    // 그러면 enum 값을 추가할 때마다 ALTER TABLE 이 필요하므로 VARCHAR 로 고정한다.
     @Enumerated(EnumType.STRING)
+    @JdbcTypeCode(SqlTypes.VARCHAR)
     @Column(nullable = false, length = 20)
     var role: MemberRole = role
         protected set
