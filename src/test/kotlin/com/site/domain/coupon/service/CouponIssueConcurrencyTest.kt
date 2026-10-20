@@ -4,15 +4,19 @@ import com.site.domain.coupon.entity.IssuedCoupon
 import com.site.domain.coupon.repository.CouponEventRepository
 import com.site.domain.coupon.repository.IssuedCouponRepository
 import com.site.independent.error.exception.ServiceException
+import com.site.independent.type.ErrorCode
 import com.site.support.IntegrationTest
 import com.site.support.couponEventFixture
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.assertThrows
+import org.redisson.api.RedissonClient
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.data.repository.findByIdOrNull
+import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
@@ -26,8 +30,10 @@ import java.util.concurrent.atomic.AtomicInteger
 @IntegrationTest
 class CouponIssueConcurrencyTest @Autowired constructor(
     private val couponIssueService: CouponIssueService,
+    private val couponIssueFacade: CouponIssueFacade,
     private val couponEventRepository: CouponEventRepository,
     private val issuedCouponRepository: IssuedCouponRepository,
+    private val redissonClient: RedissonClient,
 ) {
 
     private val log = LoggerFactory.getLogger(javaClass)
@@ -62,6 +68,32 @@ class CouponIssueConcurrencyTest @Autowired constructor(
     @Test
     fun `원자적 UPDATE - 정확히 100장만 발급된다`() {
         assertExactlyTotalIssued(issueConcurrently("원자적 UPDATE", couponIssueService::issueWithAtomicUpdate))
+    }
+
+    @Test
+    fun `분산락 + 사전 검사 - 정확히 100장만 발급된다`() {
+        assertExactlyTotalIssued(issueConcurrently("분산락 + 사전 검사", couponIssueFacade::issue))
+    }
+
+    @Test
+    fun `사전 검사 덕분에 소진된 이벤트는 락을 기다리지 않고 바로 거절된다`() {
+        val couponEventId = couponEventRepository.save(couponEventFixture(totalQuantity = 1)).id
+        couponIssueFacade.issue(couponEventId, memberId = 1L)
+
+        // 다른 누군가가 락을 오래 쥐고 있는 상황 (락 이름은 DistributedLockAspect 의 "lock:" + key)
+        val lock = redissonClient.getLock("lock:coupon-event:$couponEventId")
+        lock.lock()
+        try {
+            // Redisson 락은 같은 스레드면 재진입되므로 반드시 다른 스레드에서 요청한다
+            val errorCode = CompletableFuture.supplyAsync {
+                assertThrows<ServiceException> { couponIssueFacade.issue(couponEventId, memberId = 2L) }.errorCode
+            }.get(10, TimeUnit.SECONDS)
+
+            // 사전 검사가 없었다면 락을 5초(waitTime) 기다린 뒤 LOCK_ACQUISITION_FAILED 가 났을 것이다
+            assertEquals(ErrorCode.COUPON_SOLD_OUT, errorCode)
+        } finally {
+            lock.unlock()
+        }
     }
 
     @Test

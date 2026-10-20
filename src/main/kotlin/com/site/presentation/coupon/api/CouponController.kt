@@ -1,6 +1,6 @@
 package com.site.presentation.coupon.api
 
-import com.site.domain.coupon.service.CouponIssueService
+import com.site.domain.coupon.service.CouponIssueFacade
 import com.site.independent.response.SuccessResponse
 import com.site.independent.response.toResponseEntity
 import com.site.independent.type.SuccessCode
@@ -17,7 +17,7 @@ import org.springframework.web.bind.annotation.RestController
 @RestController
 @RequestMapping("/api/coupon-events")
 class CouponController(
-    private val couponIssueService: CouponIssueService,
+    private val couponIssueFacade: CouponIssueFacade,
 ) {
 
     @PostMapping("/{couponEventId}/issue")
@@ -25,7 +25,7 @@ class CouponController(
         @PathVariable couponEventId: Long,
         @AuthenticationPrincipal authMember: AuthMember,
     ): ResponseEntity<SuccessResponse<IssuedCouponResponse>> {
-        val issuedCoupon = couponIssueService.issueWithDistributedLock(couponEventId, authMember.memberId)
+        val issuedCoupon = couponIssueFacade.issue(couponEventId, authMember.memberId)
         return SuccessCode.ISSUE_COUPON_SUCCESS.toResponseEntity(issuedCoupon.toResponse())
     }
 }

@@ -84,6 +84,16 @@ class CouponIssueService(
         return saveIssuedCoupon(couponEventId, memberId)
     }
 
+    /**
+     * 락 없이 가볍게 확인한다. (CouponIssueFacade 의 빠른 거절용)
+     * 여기를 통과해도 발급이 보장되지는 않는다. 락 안에서 같은 검사를 다시 한다.
+     */
+    @Transactional(readOnly = true)
+    fun precheck(couponEventId: Long, memberId: Long) {
+        findCouponEvent(couponEventId).checkIssuable(now())
+        checkNotIssued(couponEventId, memberId)
+    }
+
     private fun issue(couponEvent: CouponEvent, memberId: Long): IssuedCoupon {
         checkNotIssued(couponEvent.id, memberId)
         couponEvent.issue(now())
