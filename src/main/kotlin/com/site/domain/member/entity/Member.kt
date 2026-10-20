@@ -24,6 +24,7 @@ class Member(
     password: String,
     nickname: String,
     role: MemberRole = MemberRole.USER,
+    phoneNumber: String? = null,
 ) : BaseTimeEntity() {
 
     @Id
@@ -48,5 +49,10 @@ class Member(
     @JdbcTypeCode(SqlTypes.VARCHAR)
     @Column(nullable = false, length = 20)
     var role: MemberRole = role
+        protected set
+
+    // 선택 입력. 없으면 알림톡을 보내지 않는다. (nullable 타입이라 쓰는 쪽에서 null 처리를 강제받는다)
+    @Column(length = 20)
+    var phoneNumber: String? = phoneNumber
         protected set
 }

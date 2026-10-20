@@ -61,6 +61,21 @@ class MemberAuthApiTest @Autowired constructor(
     }
 
     @Test
+    fun `휴대폰 번호는 선택 입력이고, 입력하면 형식을 검사한다`() {
+        signUp(email = "phone@test.com", password = "password123", nickname = "tester", phoneNumber = "01012345678")
+            .andExpect {
+                status { isCreated() }
+                jsonPath("$.data.phoneNumber") { value("01012345678") }
+            }
+
+        signUp(email = "bad@test.com", password = "password123", nickname = "tester", phoneNumber = "010-1234-5678")
+            .andExpect {
+                status { isBadRequest() }
+                jsonPath("$.errors[0].field") { value("phoneNumber") }
+            }
+    }
+
+    @Test
     fun `필수 필드가 JSON 에서 빠지면 400`() {
         mockMvc.post("/api/members") {
             contentType = MediaType.APPLICATION_JSON
@@ -202,11 +217,17 @@ class MemberAuthApiTest @Autowired constructor(
 
     private data class Tokens(val accessToken: String, val refreshToken: String)
 
-    private fun signUp(email: String, password: String, nickname: String) =
+    private fun signUp(email: String, password: String, nickname: String, phoneNumber: String? = null) =
         mockMvc.post("/api/members") {
             contentType = MediaType.APPLICATION_JSON
+            // buildMap: 조건에 따라 항목을 넣고 빼면서 읽기 전용 Map 을 만든다. (phoneNumber 가 없으면 키 자체를 뺀다)
             content = objectMapper.writeValueAsString(
-                mapOf("email" to email, "password" to password, "nickname" to nickname),
+                buildMap {
+                    put("email", email)
+                    put("password", password)
+                    put("nickname", nickname)
+                    phoneNumber?.let { put("phoneNumber", it) }
+                },
             )
         }
 

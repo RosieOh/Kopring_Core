@@ -18,7 +18,7 @@ class MemberService(
 ) {
 
     @Transactional
-    fun signUp(email: String, rawPassword: String, nickname: String): Member {
+    fun signUp(email: String, rawPassword: String, nickname: String, phoneNumber: String? = null): Member {
         if (memberRepository.existsByEmail(email)) {
             throw ServiceException(ErrorCode.DUPLICATE_EMAIL)
         }
@@ -27,6 +27,7 @@ class MemberService(
             email = email,
             password = passwordEncoder.encode(rawPassword),
             nickname = nickname,
+            phoneNumber = phoneNumber,
         )
 
         // 같은 이메일 가입이 existsByEmail 과 저장 사이에 끼어들면 DB unique 제약이 최후의 방어선이 된다.

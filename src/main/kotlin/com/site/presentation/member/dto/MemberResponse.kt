@@ -9,6 +9,7 @@ data class MemberResponse(
     val email: String,
     val nickname: String,
     val role: MemberRole,
+    val phoneNumber: String?,
     val createdAt: LocalDateTime,
 )
 
@@ -19,5 +20,6 @@ fun Member.toResponse(): MemberResponse =
         email = email,
         nickname = nickname,
         role = role,
+        phoneNumber = phoneNumber,
         createdAt = createdAt,
     )

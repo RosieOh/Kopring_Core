@@ -2,6 +2,7 @@ package com.site.presentation.member.dto
 
 import jakarta.validation.constraints.Email
 import jakarta.validation.constraints.NotBlank
+import jakarta.validation.constraints.Pattern
 import jakarta.validation.constraints.Size
 
 /**
@@ -20,4 +21,8 @@ data class SignUpRequest(
     @field:NotBlank
     @field:Size(max = 20)
     val nickname: String,
+
+    // 선택 입력: JSON 에 없으면 기본값 null 이 들어간다. (@Pattern 은 null 이면 검사하지 않는다)
+    @field:Pattern(regexp = "^01[016789]\\d{7,8}$", message = "휴대폰 번호는 숫자만 10~11자리로 입력해주세요.")
+    val phoneNumber: String? = null,
 )

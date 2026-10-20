@@ -29,6 +29,7 @@ class MemberController(
             email = request.email,
             rawPassword = request.password,
             nickname = request.nickname,
+            phoneNumber = request.phoneNumber,
         )
         return SuccessCode.SIGN_UP_SUCCESS.toResponseEntity(member.toResponse())
     }

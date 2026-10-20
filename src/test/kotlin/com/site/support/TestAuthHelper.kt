@@ -24,9 +24,15 @@ class TestAuthHelper(
     private val passwordEncoder: PasswordEncoder,
 ) {
 
-    fun createMemberAndLogin(email: String, role: MemberRole = MemberRole.USER): String {
+    fun createMemberAndLogin(email: String, role: MemberRole = MemberRole.USER, phoneNumber: String? = null): String {
         memberRepository.save(
-            Member(email = email, password = passwordEncoder.encode(PASSWORD), nickname = "tester", role = role),
+            Member(
+                email = email,
+                password = passwordEncoder.encode(PASSWORD),
+                nickname = "tester",
+                role = role,
+                phoneNumber = phoneNumber,
+            ),
         )
 
         val response = mockMvc.post("/api/auth/login") {
