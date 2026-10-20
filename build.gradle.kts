@@ -68,6 +68,7 @@ dependencies {
     testImplementation("org.springframework.boot:spring-boot-testcontainers")
     testImplementation("org.testcontainers:mysql")
     testImplementation("io.mockk:mockk:1.13.13")
+    testImplementation("org.awaitility:awaitility-kotlin")
 
     runtimeOnly("io.netty:netty-resolver-dns-native-macos:4.1.115.Final")
 }

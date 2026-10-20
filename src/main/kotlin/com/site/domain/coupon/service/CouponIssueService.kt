@@ -2,11 +2,13 @@ package com.site.domain.coupon.service
 
 import com.site.domain.coupon.entity.CouponEvent
 import com.site.domain.coupon.entity.IssuedCoupon
+import com.site.domain.coupon.event.CouponIssuedEvent
 import com.site.domain.coupon.repository.CouponEventRepository
 import com.site.domain.coupon.repository.IssuedCouponRepository
 import com.site.independent.error.exception.ServiceException
 import com.site.independent.type.ErrorCode
 import com.site.infrastructure.redis.lock.DistributedLock
+import org.springframework.context.ApplicationEventPublisher
 import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.data.repository.findByIdOrNull
 import org.springframework.stereotype.Service
@@ -28,6 +30,7 @@ import java.time.LocalDateTime
 class CouponIssueService(
     private val couponEventRepository: CouponEventRepository,
     private val issuedCouponRepository: IssuedCouponRepository,
+    private val eventPublisher: ApplicationEventPublisher,
     private val clock: Clock,
 ) {
 
@@ -112,12 +115,19 @@ class CouponIssueService(
 
     // 같은 회원의 동시 요청이 checkNotIssued 를 함께 통과해도 unique 제약이 막는다.
     // 예외가 나면 트랜잭션 전체가 롤백되므로 올려둔 issuedQuantity 도 함께 되돌아간다.
-    private fun saveIssuedCoupon(couponEventId: Long, memberId: Long): IssuedCoupon =
-        try {
+    private fun saveIssuedCoupon(couponEventId: Long, memberId: Long): IssuedCoupon {
+        val issuedCoupon = try {
             issuedCouponRepository.saveAndFlush(IssuedCoupon(couponEventId = couponEventId, memberId = memberId))
         } catch (e: DataIntegrityViolationException) {
             throw ServiceException(ErrorCode.ALREADY_ISSUED_COUPON)
         }
+
+        // 트랜잭션 안에서 발행하지만, 리스너(@TransactionalEventListener)는 커밋된 뒤에야 받는다
+        eventPublisher.publishEvent(
+            CouponIssuedEvent(issuedCouponId = issuedCoupon.id, couponEventId = couponEventId, memberId = memberId),
+        )
+        return issuedCoupon
+    }
 
     private fun now(): LocalDateTime = LocalDateTime.now(clock)
 }
