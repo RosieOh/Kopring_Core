@@ -2,17 +2,16 @@ package com.site.presentation
 
 import com.fasterxml.jackson.databind.ObjectMapper
 import com.site.domain.coupon.repository.CouponEventRepository
-import com.site.domain.member.entity.Member
 import com.site.domain.member.entity.MemberRole
 import com.site.domain.member.repository.MemberRepository
 import com.site.support.IntegrationTest
+import com.site.support.TestAuthHelper
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.http.HttpHeaders
 import org.springframework.http.MediaType
-import org.springframework.security.crypto.password.PasswordEncoder
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.delete
 import org.springframework.test.web.servlet.get
@@ -27,7 +26,7 @@ class AdminCouponEventApiTest @Autowired constructor(
     private val objectMapper: ObjectMapper,
     private val memberRepository: MemberRepository,
     private val couponEventRepository: CouponEventRepository,
-    private val passwordEncoder: PasswordEncoder,
+    private val testAuthHelper: TestAuthHelper,
 ) {
 
     private val now = LocalDateTime.now().truncatedTo(ChronoUnit.SECONDS)
@@ -35,7 +34,7 @@ class AdminCouponEventApiTest @Autowired constructor(
 
     @BeforeEach
     fun setUp() {
-        adminToken = createMemberAndLogin(email = "admin@test.com", role = MemberRole.ADMIN)
+        adminToken = testAuthHelper.createMemberAndLogin(email = "admin@test.com", role = MemberRole.ADMIN)
     }
 
     @AfterEach
@@ -86,7 +85,7 @@ class AdminCouponEventApiTest @Autowired constructor(
 
     @Test
     fun `일반 회원은 쿠폰 이벤트를 등록할 수 없다`() {
-        val userToken = createMemberAndLogin(email = "user@test.com", role = MemberRole.USER)
+        val userToken = testAuthHelper.createMemberAndLogin(email = "user@test.com", role = MemberRole.USER)
 
         createCouponEvent(couponEventBody(), token = userToken)
             .andExpect {
@@ -235,17 +234,4 @@ class AdminCouponEventApiTest @Autowired constructor(
         mockMvc.delete("/api/admin/coupon-events/$couponEventId") {
             header(HttpHeaders.AUTHORIZATION, "Bearer $adminToken")
         }
-
-    private fun createMemberAndLogin(email: String, role: MemberRole): String {
-        memberRepository.save(
-            Member(email = email, password = passwordEncoder.encode("password123"), nickname = "tester", role = role),
-        )
-        val response = mockMvc.post("/api/auth/login") {
-            contentType = MediaType.APPLICATION_JSON
-            content = objectMapper.writeValueAsString(mapOf("email" to email, "password" to "password123"))
-        }.andExpect { status { isOk() } }
-            .andReturn().response.contentAsString
-
-        return objectMapper.readTree(response)["data"]["accessToken"].asText()
-    }
 }
