@@ -10,7 +10,7 @@ plugins {
 allOpen {
     annotation("jakarta.persistence.Entity")
     annotation("jakarta.persistence.MappedSuperclass")
-    annotation("javax.persistence.Embeddable")
+    annotation("jakarta.persistence.Embeddable")
 }
 
 group = "com"
@@ -33,11 +33,17 @@ repositories {
     mavenCentral()
 }
 
+// Boot 3.4.1 기본값(1.20.4)은 Docker Engine 29+ 가 거부하는 구버전 API 로 접속한다
+extra["testcontainers.version"] = "1.21.4"
+
 dependencies {
     implementation("org.springframework.boot:spring-boot-starter-data-jpa")
     implementation("org.springframework.boot:spring-boot-starter-oauth2-client")
     implementation("org.springframework.boot:spring-boot-starter-security")
     implementation("org.springframework.boot:spring-boot-starter-web")
+    implementation("org.springframework.boot:spring-boot-starter-validation")
+    implementation("com.fasterxml.jackson.module:jackson-module-kotlin")
+    implementation("org.jetbrains.kotlin:kotlin-reflect")
     implementation("com.github.ulisesbocchio:jasypt-spring-boot-starter:3.0.5")
     implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui:2.7.0")
     implementation("io.jsonwebtoken:jjwt:0.12.5")
@@ -56,10 +62,13 @@ dependencies {
     runtimeOnly("io.micrometer:micrometer-registry-prometheus")
 
     annotationProcessor("org.springframework.boot:spring-boot-configuration-processor")
-    annotationProcessor("org.projectlombok:lombok")
 
     testImplementation("org.springframework.boot:spring-boot-starter-test")
     testImplementation("org.springframework.security:spring-security-test")
+    testImplementation("org.springframework.boot:spring-boot-testcontainers")
+    testImplementation("org.testcontainers:mysql")
+    testImplementation("io.mockk:mockk:1.13.13")
+    testImplementation("org.awaitility:awaitility-kotlin")
 
     runtimeOnly("io.netty:netty-resolver-dns-native-macos:4.1.115.Final")
 }

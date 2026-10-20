@@ -1,0 +1,58 @@
+package com.site.domain.member.entity
+
+import com.site.domain.common.entity.BaseTimeEntity
+import jakarta.persistence.Column
+import jakarta.persistence.Entity
+import jakarta.persistence.EnumType
+import jakarta.persistence.Enumerated
+import jakarta.persistence.GeneratedValue
+import jakarta.persistence.GenerationType
+import jakarta.persistence.Id
+import jakarta.persistence.Table
+import org.hibernate.annotations.JdbcTypeCode
+import org.hibernate.type.SqlTypes
+
+/**
+ * - data class 로 만들지 않는다: equals/hashCode/toString 자동 생성이 지연 로딩·연관관계와 충돌한다.
+ * - 생성자 파라미터는 val/var 없이 받고, 프로퍼티는 protected set 으로 외부 변경을 막는다.
+ * - 기본 생성자는 kotlin("plugin.jpa"), 프록시용 open 은 allOpen 설정이 만들어준다.
+ */
+@Entity
+@Table(name = "member")
+class Member(
+    email: String,
+    password: String,
+    nickname: String,
+    role: MemberRole = MemberRole.USER,
+    phoneNumber: String? = null,
+) : BaseTimeEntity() {
+
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    val id: Long = 0L
+
+    @Column(nullable = false, unique = true, length = 100)
+    var email: String = email
+        protected set
+
+    @Column(nullable = false)
+    var password: String = password
+        protected set
+
+    @Column(nullable = false, length = 20)
+    var nickname: String = nickname
+        protected set
+
+    // Hibernate 6 는 MySQL 에서 @Enumerated(STRING) 을 네이티브 ENUM 컬럼으로 만든다.
+    // 그러면 enum 값을 추가할 때마다 ALTER TABLE 이 필요하므로 VARCHAR 로 고정한다.
+    @Enumerated(EnumType.STRING)
+    @JdbcTypeCode(SqlTypes.VARCHAR)
+    @Column(nullable = false, length = 20)
+    var role: MemberRole = role
+        protected set
+
+    // 선택 입력. 없으면 알림톡을 보내지 않는다. (nullable 타입이라 쓰는 쪽에서 null 처리를 강제받는다)
+    @Column(length = 20)
+    var phoneNumber: String? = phoneNumber
+        protected set
+}
