@@ -30,4 +30,11 @@ class Discount(
             throw ServiceException(ErrorCode.INVALID_DISCOUNT_VALUE)
         }
     }
+
+    /** 사람이 읽는 표기. 5000 → "5,000원", 10 → "10%" */
+    fun toDisplayText(): String =
+        when (type) {
+            DiscountType.FIXED_AMOUNT -> "%,d원".format(value)
+            DiscountType.PERCENTAGE -> "$value%"
+        }
 }
