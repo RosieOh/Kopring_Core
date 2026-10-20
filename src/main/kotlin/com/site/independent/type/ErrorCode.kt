@@ -25,6 +25,11 @@ enum class ErrorCode(
     METHOD_NOT_ALLOWED(405, "METHOD_NOT_ALLOWED", "지원하지 않는 HTTP 메서드입니다."),
     DUPLICATE_EMAIL(409, "DUPLICATE_EMAIL", "이미 사용 중인 이메일입니다."),
     COUPON_EVENT_ALREADY_STARTED(409, "COUPON_EVENT_ALREADY_STARTED", "이미 시작된 쿠폰 이벤트는 수정하거나 삭제할 수 없습니다."),
+    COUPON_EVENT_NOT_STARTED(409, "COUPON_EVENT_NOT_STARTED", "아직 시작되지 않은 쿠폰 이벤트입니다."),
+    COUPON_EVENT_ENDED(409, "COUPON_EVENT_ENDED", "종료된 쿠폰 이벤트입니다."),
+    COUPON_SOLD_OUT(409, "COUPON_SOLD_OUT", "쿠폰이 모두 소진되었습니다."),
+    ALREADY_ISSUED_COUPON(409, "ALREADY_ISSUED_COUPON", "이미 발급받은 쿠폰입니다."),
     INTERNAL_SERVER_ERROR(500, "INTERNAL_SERVER_ERROR", "서버 오류가 발생했습니다."),
     BIZTALK_SEND_FAIL(503, "BIZTALK_SEND_FAIL", "카카오 알림톡 전송에 실패했습니다."),
+    LOCK_ACQUISITION_FAILED(503, "LOCK_ACQUISITION_FAILED", "요청이 몰려 처리하지 못했습니다. 잠시 후 다시 시도해주세요."),
 }

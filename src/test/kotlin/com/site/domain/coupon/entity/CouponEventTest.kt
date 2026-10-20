@@ -46,6 +46,29 @@ class CouponEventTest {
     }
 
     @Test
+    fun `발급할 때마다 남은 수량이 줄고, 다 떨어지면 SOLD_OUT 이 되어 더 발급할 수 없다`() {
+        val couponEvent = couponEvent(totalQuantity = 2)
+
+        repeat(2) { couponEvent.issue(startAt) }
+
+        assertEquals(0, couponEvent.remainingQuantity)
+        assertEquals(CouponEventStatus.SOLD_OUT, couponEvent.status(startAt))
+        val exception = assertThrows<ServiceException> { couponEvent.issue(startAt) }
+        assertEquals(ErrorCode.COUPON_SOLD_OUT, exception.errorCode)
+    }
+
+    @Test
+    fun `시작 전이나 종료 후에는 발급할 수 없다`() {
+        val couponEvent = couponEvent()
+
+        val beforeStart = assertThrows<ServiceException> { couponEvent.issue(startAt.minusSeconds(1)) }
+        val afterEnd = assertThrows<ServiceException> { couponEvent.issue(endAt) }
+
+        assertEquals(ErrorCode.COUPON_EVENT_NOT_STARTED, beforeStart.errorCode)
+        assertEquals(ErrorCode.COUPON_EVENT_ENDED, afterEnd.errorCode)
+    }
+
+    @Test
     fun `시작 전에는 수정할 수 있다`() {
         val couponEvent = couponEvent()
 
