@@ -26,4 +26,6 @@ enum class SuccessCode(
     ISSUE_COUPON_SUCCESS(201, "ISSUE_COUPON_SUCCESS", "쿠폰 발급에 성공하였습니다."),
     ENTER_COUPON_QUEUE_SUCCESS(202, "ENTER_COUPON_QUEUE_SUCCESS", "쿠폰 발급 대기열에 등록되었습니다."),
     GET_COUPON_QUEUE_STATUS_SUCCESS(200, "GET_COUPON_QUEUE_STATUS_SUCCESS", "대기열 상태 조회에 성공하였습니다."),
+    GET_MY_COUPONS_SUCCESS(200, "GET_MY_COUPONS_SUCCESS", "내 쿠폰 목록 조회에 성공하였습니다."),
+    USE_COUPON_SUCCESS(200, "USE_COUPON_SUCCESS", "쿠폰 사용에 성공하였습니다."),
 }

@@ -18,6 +18,7 @@ data class CouponEventResponse(
     val endAt: LocalDateTime,
     val status: CouponEventStatus,
     val issueMode: CouponIssueMode,
+    val couponValidityDays: Int,
     val createdAt: LocalDateTime,
     val updatedAt: LocalDateTime,
 )
@@ -36,6 +37,7 @@ fun CouponEvent.toResponse(now: LocalDateTime): CouponEventResponse =
         endAt = period.endAt,
         status = status(now),
         issueMode = issueMode,
+        couponValidityDays = couponValidityDays,
         createdAt = createdAt,
         updatedAt = updatedAt,
     )

@@ -18,6 +18,7 @@ data class CouponEventCommand(
     val startAt: LocalDateTime,
     val endAt: LocalDateTime,
     val issueMode: CouponIssueMode,
+    val couponValidityDays: Int,
 ) {
     fun toDiscount(): Discount = Discount(type = discountType, value = discountValue)
 
