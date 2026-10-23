@@ -8,6 +8,8 @@ enum class ErrorCode(
     INVALID_INPUT_VALUE(400, "INVALID_INPUT_VALUE", "요청 값이 올바르지 않습니다."),
     INVALID_COUPON_EVENT_PERIOD(400, "INVALID_COUPON_EVENT_PERIOD", "이벤트 기간이 올바르지 않습니다. 종료 시각은 시작 시각과 현재 시각보다 늦어야 합니다."),
     INVALID_DISCOUNT_VALUE(400, "INVALID_DISCOUNT_VALUE", "할인 방식에 맞지 않는 할인 값입니다."),
+    QUEUE_ONLY_COUPON_EVENT(400, "QUEUE_ONLY_COUPON_EVENT", "대기열로만 받을 수 있는 쿠폰 이벤트입니다."),
+    DIRECT_ONLY_COUPON_EVENT(400, "DIRECT_ONLY_COUPON_EVENT", "즉시 발급 쿠폰 이벤트라 대기열을 쓰지 않습니다."),
     INVALID_TOKEN(401, "INVALID_TOKEN", "유효하지 않은 토큰입니다."),
     EXPIRED_TOKEN(401, "EXPIRED_TOKEN", "만료된 토큰입니다."),
     MALFORMED_TOKEN(401, "MALFORMED_TOKEN", "위/변조된 토큰입니다."),

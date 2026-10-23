@@ -6,10 +6,14 @@ import com.site.independent.type.ErrorCode
 import jakarta.persistence.Column
 import jakarta.persistence.Embedded
 import jakarta.persistence.Entity
+import jakarta.persistence.EnumType
+import jakarta.persistence.Enumerated
 import jakarta.persistence.GeneratedValue
 import jakarta.persistence.GenerationType
 import jakarta.persistence.Id
 import jakarta.persistence.Table
+import org.hibernate.annotations.JdbcTypeCode
+import org.hibernate.type.SqlTypes
 import java.time.LocalDateTime
 
 /**
@@ -25,6 +29,7 @@ class CouponEvent(
     discount: Discount,
     period: EventPeriod,
     totalQuantity: Int,
+    issueMode: CouponIssueMode = CouponIssueMode.DIRECT,
 ) : BaseTimeEntity() {
 
     @Id
@@ -45,6 +50,12 @@ class CouponEvent(
 
     @Column(nullable = false)
     var totalQuantity: Int = totalQuantity
+        protected set
+
+    @Enumerated(EnumType.STRING)
+    @JdbcTypeCode(SqlTypes.VARCHAR)
+    @Column(nullable = false, length = 20)
+    var issueMode: CouponIssueMode = issueMode
         protected set
 
     // 3단계(선착순 발급)에서 동시성 문제의 주인공이 될 컬럼
@@ -74,6 +85,7 @@ class CouponEvent(
         discount: Discount,
         period: EventPeriod,
         totalQuantity: Int,
+        issueMode: CouponIssueMode,
         now: LocalDateTime,
     ) {
         checkModifiable(now)
@@ -83,6 +95,19 @@ class CouponEvent(
         this.discount = discount
         this.period = period
         this.totalQuantity = totalQuantity
+        this.issueMode = issueMode
+    }
+
+    /** 요청한 발급 방식이 이 이벤트의 방식과 다르면 거절한다. (대기열 새치기 방지) */
+    fun checkIssueMode(requested: CouponIssueMode) {
+        if (issueMode == requested) return
+
+        throw ServiceException(
+            when (issueMode) {
+                CouponIssueMode.QUEUE -> ErrorCode.QUEUE_ONLY_COUPON_EVENT
+                CouponIssueMode.DIRECT -> ErrorCode.DIRECT_ONLY_COUPON_EVENT
+            },
+        )
     }
 
     /**

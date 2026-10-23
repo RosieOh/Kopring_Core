@@ -1,5 +1,6 @@
 package com.site.presentation
 
+import com.site.domain.coupon.entity.CouponIssueMode
 import com.site.domain.coupon.repository.CouponEventRepository
 import com.site.domain.coupon.repository.IssuedCouponRepository
 import com.site.domain.member.repository.MemberRepository
@@ -91,6 +92,18 @@ class CouponIssueApiTest @Autowired constructor(
                 status { isConflict() }
                 jsonPath("$.code") { value("COUPON_EVENT_NOT_STARTED") }
             }
+    }
+
+    @Test
+    fun `대기열 이벤트는 즉시 발급 API 로 새치기할 수 없다`() {
+        val couponEventId = couponEventRepository.save(couponEventFixture(issueMode = CouponIssueMode.QUEUE)).id
+
+        issue(couponEventId)
+            .andExpect {
+                status { isBadRequest() }
+                jsonPath("$.code") { value("QUEUE_ONLY_COUPON_EVENT") }
+            }
+        assertEquals(0L, issuedCouponRepository.countByCouponEventId(couponEventId))
     }
 
     @Test

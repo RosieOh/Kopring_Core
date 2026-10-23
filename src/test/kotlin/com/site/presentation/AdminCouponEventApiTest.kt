@@ -54,6 +54,16 @@ class AdminCouponEventApiTest @Autowired constructor(
                 jsonPath("$.data.discountType") { value("FIXED_AMOUNT") }
                 jsonPath("$.data.totalQuantity") { value(100) }
                 jsonPath("$.data.remainingQuantity") { value(100) }
+                jsonPath("$.data.issueMode") { value("DIRECT") }
+            }
+    }
+
+    @Test
+    fun `발급 방식을 대기열로 지정해 등록할 수 있다`() {
+        createCouponEvent(couponEventBody(issueMode = "QUEUE"))
+            .andExpect {
+                status { isCreated() }
+                jsonPath("$.data.issueMode") { value("QUEUE") }
             }
     }
 
@@ -194,6 +204,7 @@ class AdminCouponEventApiTest @Autowired constructor(
         totalQuantity: Int = 100,
         startAt: LocalDateTime = now.plusDays(1),
         endAt: LocalDateTime = now.plusDays(8),
+        issueMode: String = "DIRECT",
     ): String =
         objectMapper.writeValueAsString(
             mapOf(
@@ -203,6 +214,7 @@ class AdminCouponEventApiTest @Autowired constructor(
                 "totalQuantity" to totalQuantity,
                 "startAt" to startAt,
                 "endAt" to endAt,
+                "issueMode" to issueMode,
             ),
         )
 

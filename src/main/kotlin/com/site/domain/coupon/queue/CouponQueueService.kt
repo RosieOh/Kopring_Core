@@ -1,5 +1,6 @@
 package com.site.domain.coupon.queue
 
+import com.site.domain.coupon.entity.CouponIssueMode
 import com.site.domain.coupon.entity.EventPeriod
 import com.site.domain.coupon.queue.port.CouponQueueStore
 import com.site.domain.coupon.queue.port.EnqueueResult
@@ -65,7 +66,9 @@ class CouponQueueService(
 
         val couponEvent = couponEventRepository.findByIdOrNull(couponEventId)
             ?: throw ServiceException(ErrorCode.COUPON_EVENT_NOT_FOUND)
+        couponEvent.checkIssueMode(CouponIssueMode.QUEUE)
         couponEvent.checkIssuable(now)
+        // 발급 방식까지 확인한 뒤에만 캐시하므로, 캐시에 있으면 QUEUE 이벤트다 (시작 후에는 방식을 바꿀 수 없다)
         ongoingPeriods[couponEventId] = couponEvent.period
     }
 

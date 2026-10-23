@@ -1,5 +1,6 @@
 package com.site.domain.coupon.queue
 
+import com.site.domain.coupon.entity.CouponIssueMode
 import com.site.domain.coupon.queue.CouponQueueResult.ISSUED
 import com.site.domain.coupon.queue.CouponQueueResult.SOLD_OUT
 import com.site.domain.coupon.repository.CouponEventRepository
@@ -97,7 +98,7 @@ class CouponQueueTest @Autowired constructor(
     @Test
     fun `시작 전 이벤트에는 줄을 설 수 없다`() {
         val couponEventId = couponEventRepository.save(
-            couponEventFixture(startAt = serviceNow().plusDays(1), endAt = serviceNow().plusDays(2)),
+            couponEventFixture(startAt = serviceNow().plusDays(1), endAt = serviceNow().plusDays(2), issueMode = CouponIssueMode.QUEUE),
         ).id
 
         val exception = assertThrows<ServiceException> { couponQueueService.enqueue(couponEventId, 1L) }
@@ -105,5 +106,15 @@ class CouponQueueTest @Autowired constructor(
         assertEquals(ErrorCode.COUPON_EVENT_NOT_STARTED, exception.errorCode)
     }
 
-    private fun ongoingCouponEvent(totalQuantity: Int): Long = couponEventRepository.save(couponEventFixture(totalQuantity = totalQuantity)).id
+    @Test
+    fun `즉시 발급 이벤트에는 줄을 설 수 없다`() {
+        val couponEventId = couponEventRepository.save(couponEventFixture(issueMode = CouponIssueMode.DIRECT)).id
+
+        val exception = assertThrows<ServiceException> { couponQueueService.enqueue(couponEventId, 1L) }
+
+        assertEquals(ErrorCode.DIRECT_ONLY_COUPON_EVENT, exception.errorCode)
+    }
+
+    private fun ongoingCouponEvent(totalQuantity: Int): Long =
+        couponEventRepository.save(couponEventFixture(totalQuantity = totalQuantity, issueMode = CouponIssueMode.QUEUE)).id
 }

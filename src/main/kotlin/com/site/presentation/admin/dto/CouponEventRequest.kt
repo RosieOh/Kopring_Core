@@ -1,5 +1,6 @@
 package com.site.presentation.admin.dto
 
+import com.site.domain.coupon.entity.CouponIssueMode
 import com.site.domain.coupon.entity.DiscountType
 import com.site.domain.coupon.service.CouponEventCommand
 import jakarta.validation.constraints.Max
@@ -31,6 +32,9 @@ data class CouponEventRequest(
     val startAt: LocalDateTime,
 
     val endAt: LocalDateTime,
+
+    // 생략하면 즉시 발급. 시작 후에는 바꿀 수 없다.
+    val issueMode: CouponIssueMode = CouponIssueMode.DIRECT,
 )
 
 fun CouponEventRequest.toCommand(): CouponEventCommand =
@@ -41,4 +45,5 @@ fun CouponEventRequest.toCommand(): CouponEventCommand =
         totalQuantity = totalQuantity,
         startAt = startAt,
         endAt = endAt,
+        issueMode = issueMode,
     )

@@ -29,6 +29,7 @@ class CouponEventService(
             discount = command.toDiscount(),
             period = period,
             totalQuantity = command.totalQuantity,
+            issueMode = command.issueMode,
         )
         return couponEventRepository.save(couponEvent)
     }
@@ -53,6 +54,7 @@ class CouponEventService(
             discount = command.toDiscount(),
             period = command.toPeriod().also { it.requireNotEnded(now) },
             totalQuantity = command.totalQuantity,
+            issueMode = command.issueMode,
             now = now,
         )
         return couponEvent
