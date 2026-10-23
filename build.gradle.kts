@@ -42,7 +42,6 @@ dependencies {
     implementation("com.github.ulisesbocchio:jasypt-spring-boot-starter:3.0.5")
     implementation("org.springdoc:springdoc-openapi-starter-webmvc-ui:2.7.0")
     implementation("io.jsonwebtoken:jjwt:0.12.5")
-    implementation("com.google.code.gson:gson:2.11.0")
 
     implementation("org.springframework.boot:spring-boot-starter-aop")
 
