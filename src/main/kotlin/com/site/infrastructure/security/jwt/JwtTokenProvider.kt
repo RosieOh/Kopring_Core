@@ -69,12 +69,13 @@ class JwtTokenProvider(
     }
 
     // when + is 로 예외 타입별 분기 (스마트 캐스트)
-    private fun JwtException.toErrorCode(): ErrorCode = when (this) {
-        is ExpiredJwtException -> ErrorCode.EXPIRED_TOKEN
-        is UnsupportedJwtException -> ErrorCode.UNSUPPORTED_TOKEN
-        is MalformedJwtException, is JwtSecurityException -> ErrorCode.MALFORMED_TOKEN
-        else -> ErrorCode.INVALID_TOKEN
-    }
+    private fun JwtException.toErrorCode(): ErrorCode =
+        when (this) {
+            is ExpiredJwtException -> ErrorCode.EXPIRED_TOKEN
+            is UnsupportedJwtException -> ErrorCode.UNSUPPORTED_TOKEN
+            is MalformedJwtException, is JwtSecurityException -> ErrorCode.MALFORMED_TOKEN
+            else -> ErrorCode.INVALID_TOKEN
+        }
 
     companion object {
         private const val ROLE_CLAIM = "role"

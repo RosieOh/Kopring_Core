@@ -40,8 +40,7 @@ class CouponQueueRepository(
         redisTemplate.opsForSet().add(ACTIVE_KEY, couponEventId.toString())
     }
 
-    fun activeEventIds(): Set<Long> =
-        redisTemplate.opsForSet().members(ACTIVE_KEY).orEmpty().map { it.toLong() }.toSet()
+    fun activeEventIds(): Set<Long> = redisTemplate.opsForSet().members(ACTIVE_KEY).orEmpty().map { it.toLong() }.toSet()
 
     fun deactivate(couponEventId: Long) {
         redisTemplate.opsForSet().remove(ACTIVE_KEY, couponEventId.toString())
@@ -61,13 +60,15 @@ class CouponQueueRepository(
             .sortedBy { it.score }
             .mapNotNull { it.value?.toLong() }
 
-    fun waitingCount(couponEventId: Long): Long =
-        redisTemplate.opsForZSet().zCard(waitingKey(couponEventId)) ?: 0
+    fun waitingCount(couponEventId: Long): Long = redisTemplate.opsForZSet().zCard(waitingKey(couponEventId)) ?: 0
 
-    fun rank(couponEventId: Long, memberId: Long): Long? =
-        redisTemplate.opsForZSet().rank(waitingKey(couponEventId), memberId.toString())
+    fun rank(couponEventId: Long, memberId: Long): Long? = redisTemplate.opsForZSet().rank(waitingKey(couponEventId), memberId.toString())
 
-    fun saveResults(couponEventId: Long, memberIds: List<Long>, result: CouponQueueResult) {
+    fun saveResults(
+        couponEventId: Long,
+        memberIds: List<Long>,
+        result: CouponQueueResult,
+    ) {
         if (memberIds.isEmpty()) return
         val key = resultKey(couponEventId)
         redisTemplate.opsForHash<String, String>().putAll(key, memberIds.associate { it.toString() to result.name })

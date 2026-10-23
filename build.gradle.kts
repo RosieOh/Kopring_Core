@@ -5,6 +5,7 @@ plugins {
     id("org.springframework.boot") version "3.4.1"
     id("io.spring.dependency-management") version "1.1.7"
     id("org.sonarqube") version "6.0.1.5171"
+    id("org.jlleitschuh.gradle.ktlint") version "12.1.2"
 }
 
 allOpen {
@@ -91,7 +92,12 @@ kotlin {
     }
 }
 
-//tasks.register("installGitHooks") {
+ktlint {
+    // 플러그인 기본 엔진(1.0.x)은 Kotlin 2.x 컴파일러와 충돌한다. Kotlin 2.1 기반 엔진을 쓴다.
+    version.set("1.5.0")
+}
+
+// tasks.register("installGitHooks") {
 //    group = "gitHooks"
 //    description = "Install or update Git Hooks."
 //
@@ -108,4 +114,4 @@ kotlin {
 //            println("Installed Git Hooks: ${hookFile.name}")
 //        }
 //    }
-//}
+// }

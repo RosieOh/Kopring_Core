@@ -61,12 +61,13 @@ class CouponEvent(
         require(totalQuantity > 0) { "totalQuantity must be positive: $totalQuantity" }
     }
 
-    fun status(now: LocalDateTime): CouponEventStatus = when {
-        period.isUpcoming(now) -> CouponEventStatus.UPCOMING
-        period.isEnded(now) -> CouponEventStatus.ENDED
-        issuedQuantity >= totalQuantity -> CouponEventStatus.SOLD_OUT
-        else -> CouponEventStatus.ONGOING
-    }
+    fun status(now: LocalDateTime): CouponEventStatus =
+        when {
+            period.isUpcoming(now) -> CouponEventStatus.UPCOMING
+            period.isEnded(now) -> CouponEventStatus.ENDED
+            issuedQuantity >= totalQuantity -> CouponEventStatus.SOLD_OUT
+            else -> CouponEventStatus.ONGOING
+        }
 
     fun update(
         name: String,

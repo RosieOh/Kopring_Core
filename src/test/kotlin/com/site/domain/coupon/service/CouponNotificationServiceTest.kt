@@ -95,6 +95,5 @@ class CouponNotificationServiceTest {
         verify(exactly = 0) { alimtalkSender.send(any()) }
     }
 
-    private fun member(phoneNumber: String?) =
-        Member(email = "user@test.com", password = "encoded", nickname = "로지", phoneNumber = phoneNumber)
+    private fun member(phoneNumber: String?) = Member(email = "user@test.com", password = "encoded", nickname = "로지", phoneNumber = phoneNumber)
 }

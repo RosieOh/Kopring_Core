@@ -22,12 +22,10 @@ class RefreshTokenRepository(
         redisTemplate.opsForValue().set(key(refreshToken), memberId.toString(), jwtProperties.refreshTokenExpiration)
     }
 
-    fun findMemberId(refreshToken: String): Long? =
-        redisTemplate.opsForValue().get(key(refreshToken))?.toLong()
+    fun findMemberId(refreshToken: String): Long? = redisTemplate.opsForValue().get(key(refreshToken))?.toLong()
 
     /** 조회와 삭제를 Redis GETDEL 한 번으로 처리한다. 같은 토큰은 딱 한 번만 꺼낼 수 있다. */
-    fun consume(refreshToken: String): Long? =
-        redisTemplate.opsForValue().getAndDelete(key(refreshToken))?.toLong()
+    fun consume(refreshToken: String): Long? = redisTemplate.opsForValue().getAndDelete(key(refreshToken))?.toLong()
 
     fun delete(refreshToken: String) {
         redisTemplate.delete(key(refreshToken))

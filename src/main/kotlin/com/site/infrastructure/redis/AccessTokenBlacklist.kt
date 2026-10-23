@@ -23,8 +23,7 @@ class AccessTokenBlacklist(
         redisTemplate.opsForValue().set(key(tokenId), LOGOUT_VALUE, ttl)
     }
 
-    fun contains(tokenId: String): Boolean =
-        redisTemplate.hasKey(key(tokenId)) == true
+    fun contains(tokenId: String): Boolean = redisTemplate.hasKey(key(tokenId)) == true
 
     private fun key(tokenId: String) = "$KEY_PREFIX$tokenId"
 

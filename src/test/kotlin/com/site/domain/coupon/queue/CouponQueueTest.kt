@@ -105,6 +105,5 @@ class CouponQueueTest @Autowired constructor(
         assertEquals(ErrorCode.COUPON_EVENT_NOT_STARTED, exception.errorCode)
     }
 
-    private fun ongoingCouponEvent(totalQuantity: Int): Long =
-        couponEventRepository.save(couponEventFixture(totalQuantity = totalQuantity)).id
+    private fun ongoingCouponEvent(totalQuantity: Int): Long = couponEventRepository.save(couponEventFixture(totalQuantity = totalQuantity)).id
 }

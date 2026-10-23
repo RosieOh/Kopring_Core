@@ -193,16 +193,17 @@ class AdminCouponEventApiTest @Autowired constructor(
         totalQuantity: Int = 100,
         startAt: LocalDateTime = now.plusDays(1),
         endAt: LocalDateTime = now.plusDays(8),
-    ): String = objectMapper.writeValueAsString(
-        mapOf(
-            "name" to name,
-            "discountType" to discountType,
-            "discountValue" to discountValue,
-            "totalQuantity" to totalQuantity,
-            "startAt" to startAt,
-            "endAt" to endAt,
-        ),
-    )
+    ): String =
+        objectMapper.writeValueAsString(
+            mapOf(
+                "name" to name,
+                "discountType" to discountType,
+                "discountValue" to discountValue,
+                "totalQuantity" to totalQuantity,
+                "startAt" to startAt,
+                "endAt" to endAt,
+            ),
+        )
 
     private fun createCouponEvent(body: String, token: String = adminToken) =
         mockMvc.post("/api/admin/coupon-events") {

@@ -4,9 +4,13 @@ package com.site.domain.coupon.queue
 sealed interface CouponQueueStatus {
 
     /** @property position 1부터 시작하는 내 순번 */
-    data class Waiting(val position: Long) : CouponQueueStatus
+    data class Waiting(
+        val position: Long,
+    ) : CouponQueueStatus
 
-    data class Done(val result: CouponQueueResult) : CouponQueueStatus
+    data class Done(
+        val result: CouponQueueResult,
+    ) : CouponQueueStatus
 
     data object NotInQueue : CouponQueueStatus
 }
