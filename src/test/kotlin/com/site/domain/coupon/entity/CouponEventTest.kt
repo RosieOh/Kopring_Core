@@ -77,12 +77,32 @@ class CouponEventTest {
             discount = Discount(DiscountType.PERCENTAGE, 10),
             period = EventPeriod(startAt.plusDays(1), endAt.plusDays(1)),
             totalQuantity = 50,
+            issueMode = CouponIssueMode.QUEUE,
+            couponValidityDays = 7,
             now = startAt.minusDays(1),
         )
 
         assertEquals("수정된 이벤트", couponEvent.name)
         assertEquals(DiscountType.PERCENTAGE, couponEvent.discount.type)
         assertEquals(50, couponEvent.remainingQuantity)
+        assertEquals(CouponIssueMode.QUEUE, couponEvent.issueMode)
+        assertEquals(startAt.plusDays(7), couponEvent.couponExpiresAt(issuedAt = startAt))
+    }
+
+    @Test
+    fun `발급 방식이 다른 요청은 거절한다`() {
+        val queueEvent = CouponEvent("대기열", Discount(DiscountType.FIXED_AMOUNT, 1_000), EventPeriod(startAt, endAt), 10, CouponIssueMode.QUEUE)
+        val directEvent = couponEvent()
+
+        assertDoesNotThrow { queueEvent.checkIssueMode(CouponIssueMode.QUEUE) }
+        assertEquals(
+            ErrorCode.QUEUE_ONLY_COUPON_EVENT,
+            assertThrows<ServiceException> { queueEvent.checkIssueMode(CouponIssueMode.DIRECT) }.errorCode,
+        )
+        assertEquals(
+            ErrorCode.DIRECT_ONLY_COUPON_EVENT,
+            assertThrows<ServiceException> { directEvent.checkIssueMode(CouponIssueMode.QUEUE) }.errorCode,
+        )
     }
 
     @Test
@@ -95,6 +115,8 @@ class CouponEventTest {
                 discount = couponEvent.discount,
                 period = couponEvent.period,
                 totalQuantity = 50,
+                issueMode = couponEvent.issueMode,
+                couponValidityDays = couponEvent.couponValidityDays,
                 now = startAt,
             )
         }

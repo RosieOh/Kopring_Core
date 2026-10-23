@@ -1,4 +1,4 @@
-package com.site.infrastructure.redis.lock
+package com.site.independent.lock
 
 import java.util.concurrent.TimeUnit
 

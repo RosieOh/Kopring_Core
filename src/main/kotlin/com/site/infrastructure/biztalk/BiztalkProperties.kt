@@ -1,5 +1,6 @@
 package com.site.infrastructure.biztalk
 
+import com.site.domain.notification.port.AlimtalkTemplate
 import org.springframework.boot.context.properties.ConfigurationProperties
 
 /**
@@ -14,4 +15,10 @@ data class BiztalkProperties(
     val senderNumber: String = "",
     val pfId: String = "",
     val couponIssuedTemplateId: String = "COUPON_ISSUED",
-)
+) {
+    /** domain 의 알림 종류를 카카오에 등록된 실제 템플릿 ID 로 바꾼다. 템플릿이 늘면 when 이 빠진 분기를 컴파일 에러로 알려준다. */
+    fun templateIdOf(template: AlimtalkTemplate): String =
+        when (template) {
+            AlimtalkTemplate.COUPON_ISSUED -> couponIssuedTemplateId
+        }
+}

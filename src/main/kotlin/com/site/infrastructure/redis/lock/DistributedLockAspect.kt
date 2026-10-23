@@ -1,6 +1,7 @@
 package com.site.infrastructure.redis.lock
 
 import com.site.independent.error.exception.ServiceException
+import com.site.independent.lock.DistributedLock
 import com.site.independent.parser.CustomSpringELParser
 import com.site.independent.type.ErrorCode
 import org.aspectj.lang.ProceedingJoinPoint

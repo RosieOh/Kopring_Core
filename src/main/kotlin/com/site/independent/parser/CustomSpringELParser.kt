@@ -6,7 +6,9 @@ import org.springframework.expression.spel.support.StandardEvaluationContext
 
 object CustomSpringELParser {
     fun getDynamicValue(
-        parameterNames: Array<String>, args: Array<Any>, key: String,
+        parameterNames: Array<String>,
+        args: Array<Any>,
+        key: String,
     ): Any {
         val parser: ExpressionParser = SpelExpressionParser()
         val context = StandardEvaluationContext()
@@ -15,6 +17,7 @@ object CustomSpringELParser {
             context.setVariable(name, args[index])
         }
 
-        return parser.parseExpression(key).getValue<Any>(context, Any::class.java)!!
+        return parser.parseExpression(key).getValue(context, Any::class.java)
+            ?: error("SpEL 표현식 '$key' 의 결과가 null 입니다. 메서드 파라미터 이름과 표현식을 확인하세요.")
     }
 }

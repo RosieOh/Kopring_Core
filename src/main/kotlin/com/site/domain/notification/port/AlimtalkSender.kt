@@ -1,7 +1,7 @@
-package com.site.infrastructure.biztalk
+package com.site.domain.notification.port
 
 /**
- * 카카오 알림톡 발송기. 실제 구현(Solapi)과 로그 대체 구현을 설정으로 바꿔 끼운다.
+ * 카카오 알림톡 발송 포트. 실제 구현(Solapi)과 로그 대체 구현은 infrastructure 에 있다.
  *
  * 발송 실패를 예외 대신 반환값(AlimtalkSendResult)으로 돌려준다.
  * 호출하는 쪽이 when 으로 성공/실패를 빠짐없이 처리하도록 컴파일러가 강제해준다.
@@ -11,12 +11,19 @@ interface AlimtalkSender {
 }
 
 /**
- * @property templateId 카카오에 사전 승인받은 템플릿 ID. 알림톡은 승인된 템플릿과 문구가 정확히 일치해야 발송된다.
+ * 어떤 알림인지. 카카오에 등록된 실제 템플릿 ID 는 설정값이라 어댑터가 이 enum 을 보고 찾는다.
+ * (domain 은 "쿠폰 발급 알림을 보낸다"만 알면 된다)
+ */
+enum class AlimtalkTemplate {
+    COUPON_ISSUED,
+}
+
+/**
  * @property variables 템플릿 변수 치환값. 예) "#{닉네임}" to "로지"
  */
 data class AlimtalkMessage(
     val to: String,
-    val templateId: String,
+    val template: AlimtalkTemplate,
     val variables: Map<String, String>,
 )
 
@@ -28,9 +35,8 @@ sealed interface AlimtalkSendResult {
     data object Success : AlimtalkSendResult
 
     /** @property retryable 일시적인 오류(네트워크 등)라 다시 보내면 성공할 수 있는지 */
-    data class Failure(val reason: String, val retryable: Boolean) : AlimtalkSendResult
+    data class Failure(
+        val reason: String,
+        val retryable: Boolean,
+    ) : AlimtalkSendResult
 }
-
-/** 로그에 휴대폰 번호를 그대로 남기지 않는다. 01012345678 → 010****5678 */
-fun String.maskPhoneNumber(): String =
-    if (length < 8) "****" else take(3) + "****" + takeLast(4)

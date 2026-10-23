@@ -20,8 +20,7 @@ class TestContainersConfig {
 
     @Bean
     @ServiceConnection
-    fun mysqlContainer(): MySQLContainer<*> =
-        MySQLContainer(DockerImageName.parse("mysql:8.4"))
+    fun mysqlContainer(): MySQLContainer<*> = MySQLContainer(DockerImageName.parse("mysql:8.4"))
 
     @Bean
     @ServiceConnection(name = "redis")

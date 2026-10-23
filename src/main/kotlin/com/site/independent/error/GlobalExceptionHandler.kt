@@ -19,8 +19,7 @@ class GlobalExceptionHandler {
     private val log = LoggerFactory.getLogger(javaClass)
 
     @ExceptionHandler(ServiceException::class)
-    fun handleServiceException(e: ServiceException): ResponseEntity<ErrorResponse> =
-        e.errorCode.toResponseEntity()
+    fun handleServiceException(e: ServiceException): ResponseEntity<ErrorResponse> = e.errorCode.toResponseEntity()
 
     // @Valid 검증 실패 (예: 이메일 형식 오류, 길이 제한 위반)
     @ExceptionHandler(MethodArgumentNotValidException::class)
@@ -43,12 +42,10 @@ class GlobalExceptionHandler {
 
     // 페이징 정렬 기준에 없는 필드를 넣은 경우 (예: ?sort=unknown)
     @ExceptionHandler(PropertyReferenceException::class)
-    fun handlePropertyReference(e: PropertyReferenceException): ResponseEntity<ErrorResponse> =
-        ErrorCode.INVALID_INPUT_VALUE.toResponseEntity()
+    fun handlePropertyReference(e: PropertyReferenceException): ResponseEntity<ErrorResponse> = ErrorCode.INVALID_INPUT_VALUE.toResponseEntity()
 
     @ExceptionHandler(NoResourceFoundException::class)
-    fun handleNoResourceFound(e: NoResourceFoundException): ResponseEntity<ErrorResponse> =
-        ErrorCode.RESOURCE_NOT_FOUND.toResponseEntity()
+    fun handleNoResourceFound(e: NoResourceFoundException): ResponseEntity<ErrorResponse> = ErrorCode.RESOURCE_NOT_FOUND.toResponseEntity()
 
     @ExceptionHandler(HttpRequestMethodNotSupportedException::class)
     fun handleMethodNotSupported(e: HttpRequestMethodNotSupportedException): ResponseEntity<ErrorResponse> =
@@ -60,8 +57,6 @@ class GlobalExceptionHandler {
         return ErrorCode.INTERNAL_SERVER_ERROR.toResponseEntity()
     }
 
-    private fun ErrorCode.toResponseEntity(
-        errors: List<ErrorResponse.FieldErrorDetail> = emptyList(),
-    ): ResponseEntity<ErrorResponse> =
+    private fun ErrorCode.toResponseEntity(errors: List<ErrorResponse.FieldErrorDetail> = emptyList()): ResponseEntity<ErrorResponse> =
         ResponseEntity.status(httpStatus).body(ErrorResponse.of(this, errors))
 }

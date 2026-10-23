@@ -12,13 +12,14 @@ data class CouponQueueStatusResponse(
     val position: Long? = null,
     val result: CouponQueueResult? = null,
 ) {
-    enum class State { WAITING, DONE, NOT_IN_QUEUE }
+    enum class State { WAITING, PROCESSING, DONE, NOT_IN_QUEUE }
 }
 
 // sealed 타입을 when 으로 펼친다. is 로 확인한 분기 안에서는 position / result 를 바로 꺼내 쓸 수 있다 (스마트 캐스트)
 fun CouponQueueStatus.toResponse(): CouponQueueStatusResponse =
     when (this) {
         is CouponQueueStatus.Waiting -> CouponQueueStatusResponse(CouponQueueStatusResponse.State.WAITING, position = position)
+        CouponQueueStatus.Processing -> CouponQueueStatusResponse(CouponQueueStatusResponse.State.PROCESSING)
         is CouponQueueStatus.Done -> CouponQueueStatusResponse(CouponQueueStatusResponse.State.DONE, result = result)
         CouponQueueStatus.NotInQueue -> CouponQueueStatusResponse(CouponQueueStatusResponse.State.NOT_IN_QUEUE)
     }

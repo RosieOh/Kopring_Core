@@ -1,6 +1,6 @@
 package com.site.infrastructure.security
 
-import com.site.infrastructure.redis.AccessTokenBlacklist
+import com.site.domain.auth.port.AccessTokenBlacklist
 import com.site.infrastructure.security.handler.JwtAccessDeniedHandler
 import com.site.infrastructure.security.handler.JwtAuthenticationEntryPoint
 import com.site.infrastructure.security.jwt.JwtAuthenticationFilter

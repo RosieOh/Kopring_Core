@@ -1,11 +1,13 @@
 package com.site.presentation
 
+import com.site.domain.coupon.entity.CouponIssueMode
 import com.site.domain.coupon.repository.CouponEventRepository
 import com.site.domain.coupon.repository.IssuedCouponRepository
 import com.site.domain.member.repository.MemberRepository
 import com.site.support.IntegrationTest
 import com.site.support.TestAuthHelper
 import com.site.support.couponEventFixture
+import com.site.support.serviceNow
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.BeforeEach
@@ -15,7 +17,6 @@ import org.springframework.data.repository.findByIdOrNull
 import org.springframework.http.HttpHeaders
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.post
-import java.time.LocalDateTime
 
 @IntegrationTest
 class CouponIssueApiTest @Autowired constructor(
@@ -83,7 +84,7 @@ class CouponIssueApiTest @Autowired constructor(
     @Test
     fun `시작 전 이벤트는 발급받을 수 없다`() {
         val couponEventId = couponEventRepository.save(
-            couponEventFixture(startAt = LocalDateTime.now().plusDays(1), endAt = LocalDateTime.now().plusDays(2)),
+            couponEventFixture(startAt = serviceNow().plusDays(1), endAt = serviceNow().plusDays(2)),
         ).id
 
         issue(couponEventId)
@@ -91,6 +92,18 @@ class CouponIssueApiTest @Autowired constructor(
                 status { isConflict() }
                 jsonPath("$.code") { value("COUPON_EVENT_NOT_STARTED") }
             }
+    }
+
+    @Test
+    fun `대기열 이벤트는 즉시 발급 API 로 새치기할 수 없다`() {
+        val couponEventId = couponEventRepository.save(couponEventFixture(issueMode = CouponIssueMode.QUEUE)).id
+
+        issue(couponEventId)
+            .andExpect {
+                status { isBadRequest() }
+                jsonPath("$.code") { value("QUEUE_ONLY_COUPON_EVENT") }
+            }
+        assertEquals(0L, issuedCouponRepository.countByCouponEventId(couponEventId))
     }
 
     @Test

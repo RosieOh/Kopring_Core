@@ -2,6 +2,7 @@ package com.site.presentation.admin.dto
 
 import com.site.domain.coupon.entity.CouponEvent
 import com.site.domain.coupon.entity.CouponEventStatus
+import com.site.domain.coupon.entity.CouponIssueMode
 import com.site.domain.coupon.entity.DiscountType
 import java.time.LocalDateTime
 
@@ -16,6 +17,8 @@ data class CouponEventResponse(
     val startAt: LocalDateTime,
     val endAt: LocalDateTime,
     val status: CouponEventStatus,
+    val issueMode: CouponIssueMode,
+    val couponValidityDays: Int,
     val createdAt: LocalDateTime,
     val updatedAt: LocalDateTime,
 )
@@ -33,6 +36,8 @@ fun CouponEvent.toResponse(now: LocalDateTime): CouponEventResponse =
         startAt = period.startAt,
         endAt = period.endAt,
         status = status(now),
+        issueMode = issueMode,
+        couponValidityDays = couponValidityDays,
         createdAt = createdAt,
         updatedAt = updatedAt,
     )

@@ -6,6 +6,7 @@ import com.site.domain.coupon.repository.IssuedCouponRepository
 import com.site.independent.error.exception.ServiceException
 import com.site.independent.type.ErrorCode
 import com.site.support.IntegrationTest
+import com.site.support.LearningCouponIssueStrategies
 import com.site.support.couponEventFixture
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
@@ -30,6 +31,7 @@ import java.util.concurrent.atomic.AtomicInteger
 @IntegrationTest
 class CouponIssueConcurrencyTest @Autowired constructor(
     private val couponIssueService: CouponIssueService,
+    private val learningStrategies: LearningCouponIssueStrategies,
     private val couponIssueFacade: CouponIssueFacade,
     private val couponEventRepository: CouponEventRepository,
     private val issuedCouponRepository: IssuedCouponRepository,
@@ -46,7 +48,7 @@ class CouponIssueConcurrencyTest @Autowired constructor(
 
     @Test
     fun `락이 없으면 동시 요청에서 발급 수량이 어긋난다`() {
-        val result = issueConcurrently("락 없음", couponIssueService::issueWithoutLock)
+        val result = issueConcurrently("락 없음", learningStrategies::issueWithoutLock)
 
         // 타이밍에 따라 결과가 달라지는 문제라 "정확히 몇 장"이 아니라 "정합성이 깨졌는지"를 확인한다.
         // 초과 발급(쿠폰 > 100장) 또는 Lost Update(수량 컬럼 ≠ 실제 발급 건수) 중 하나는 거의 확실하게 일어난다.
@@ -57,7 +59,7 @@ class CouponIssueConcurrencyTest @Autowired constructor(
 
     @Test
     fun `비관적 락 - 정확히 100장만 발급된다`() {
-        assertExactlyTotalIssued(issueConcurrently("비관적 락", couponIssueService::issueWithPessimisticLock))
+        assertExactlyTotalIssued(issueConcurrently("비관적 락", learningStrategies::issueWithPessimisticLock))
     }
 
     @Test
@@ -132,7 +134,7 @@ class CouponIssueConcurrencyTest @Autowired constructor(
      * 요청 requestCount 개를 스레드 THREAD_COUNT 개로 동시에 보낸다.
      * startSignal 로 모든 작업을 대기시켰다가 한 번에 출발시켜서, 요청이 최대한 겹치게 만든다.
      *
-     * issue 파라미터에는 couponIssueService::issueWithoutLock 같은 "함수 참조"를 넘긴다.
+     * issue 파라미터에는 learningStrategies::issueWithoutLock 같은 "함수 참조"를 넘긴다.
      */
     private fun issueConcurrently(
         label: String,

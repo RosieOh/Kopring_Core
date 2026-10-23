@@ -1,10 +1,17 @@
 package com.site.support
 
+import com.site.independent.config.ClockConfig
 import org.springframework.data.redis.core.StringRedisTemplate
+import java.time.LocalDateTime
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
+
+/**
+ * 서비스 시간대 기준의 현재 시각. 테스트 JVM 은 UTC 로 돌기 때문에 LocalDateTime.now() 를 쓰면 9시간 어긋난다.
+ */
+fun serviceNow(): LocalDateTime = LocalDateTime.now(ClockConfig.SERVICE_ZONE)
 
 /** 테스트 사이에 Redis 상태(대기열, 토큰 등)가 남지 않게 비운다. */
 fun StringRedisTemplate.flushDb() {
@@ -15,7 +22,11 @@ fun StringRedisTemplate.flushDb() {
  * task 를 taskCount 번, threadCount 개 스레드로 "동시에 출발"시켜 실행한다.
  * 작업 중 하나라도 예외가 나면 테스트를 실패시킨다.
  */
-fun runConcurrently(taskCount: Int, threadCount: Int = 32, task: (index: Int) -> Unit) {
+fun runConcurrently(
+    taskCount: Int,
+    threadCount: Int = 32,
+    task: (index: Int) -> Unit,
+) {
     val executor = Executors.newFixedThreadPool(threadCount)
     val startSignal = CountDownLatch(1)
     val doneSignal = CountDownLatch(taskCount)

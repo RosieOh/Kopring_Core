@@ -24,7 +24,11 @@ class TestAuthHelper(
     private val passwordEncoder: PasswordEncoder,
 ) {
 
-    fun createMemberAndLogin(email: String, role: MemberRole = MemberRole.USER, phoneNumber: String? = null): String {
+    fun createMemberAndLogin(
+        email: String,
+        role: MemberRole = MemberRole.USER,
+        phoneNumber: String? = null,
+    ): String {
         memberRepository.save(
             Member(
                 email = email,

@@ -29,12 +29,16 @@ class CouponEventService(
             discount = command.toDiscount(),
             period = period,
             totalQuantity = command.totalQuantity,
+            issueMode = command.issueMode,
+            couponValidityDays = command.couponValidityDays,
         )
         return couponEventRepository.save(couponEvent)
     }
 
-    fun getCouponEvents(pageable: Pageable): Page<CouponEvent> =
-        couponEventRepository.findAll(pageable)
+    /** 사용자용: 아직 끝나지 않은 이벤트 */
+    fun getNotEndedCouponEvents(pageable: Pageable): Page<CouponEvent> = couponEventRepository.findNotEnded(now(), pageable)
+
+    fun getCouponEvents(pageable: Pageable): Page<CouponEvent> = couponEventRepository.findAll(pageable)
 
     fun getCouponEvent(couponEventId: Long): CouponEvent =
         couponEventRepository.findByIdOrNull(couponEventId)
@@ -54,6 +58,8 @@ class CouponEventService(
             discount = command.toDiscount(),
             period = command.toPeriod().also { it.requireNotEnded(now) },
             totalQuantity = command.totalQuantity,
+            issueMode = command.issueMode,
+            couponValidityDays = command.couponValidityDays,
             now = now,
         )
         return couponEvent

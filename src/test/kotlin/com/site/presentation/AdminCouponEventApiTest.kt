@@ -6,6 +6,7 @@ import com.site.domain.member.entity.MemberRole
 import com.site.domain.member.repository.MemberRepository
 import com.site.support.IntegrationTest
 import com.site.support.TestAuthHelper
+import com.site.support.serviceNow
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -29,7 +30,7 @@ class AdminCouponEventApiTest @Autowired constructor(
     private val testAuthHelper: TestAuthHelper,
 ) {
 
-    private val now = LocalDateTime.now().truncatedTo(ChronoUnit.SECONDS)
+    private val now = serviceNow().truncatedTo(ChronoUnit.SECONDS)
     private lateinit var adminToken: String
 
     @BeforeEach
@@ -53,6 +54,26 @@ class AdminCouponEventApiTest @Autowired constructor(
                 jsonPath("$.data.discountType") { value("FIXED_AMOUNT") }
                 jsonPath("$.data.totalQuantity") { value(100) }
                 jsonPath("$.data.remainingQuantity") { value(100) }
+                jsonPath("$.data.issueMode") { value("DIRECT") }
+                jsonPath("$.data.couponValidityDays") { value(30) }
+            }
+    }
+
+    @Test
+    fun `쿠폰 유효기간은 1일에서 365일 사이여야 한다`() {
+        createCouponEvent(couponEventBody(couponValidityDays = 0))
+            .andExpect {
+                status { isBadRequest() }
+                jsonPath("$.errors[0].field") { value("couponValidityDays") }
+            }
+    }
+
+    @Test
+    fun `발급 방식을 대기열로 지정해 등록할 수 있다`() {
+        createCouponEvent(couponEventBody(issueMode = "QUEUE"))
+            .andExpect {
+                status { isCreated() }
+                jsonPath("$.data.issueMode") { value("QUEUE") }
             }
     }
 
@@ -193,16 +214,21 @@ class AdminCouponEventApiTest @Autowired constructor(
         totalQuantity: Int = 100,
         startAt: LocalDateTime = now.plusDays(1),
         endAt: LocalDateTime = now.plusDays(8),
-    ): String = objectMapper.writeValueAsString(
-        mapOf(
-            "name" to name,
-            "discountType" to discountType,
-            "discountValue" to discountValue,
-            "totalQuantity" to totalQuantity,
-            "startAt" to startAt,
-            "endAt" to endAt,
-        ),
-    )
+        issueMode: String = "DIRECT",
+        couponValidityDays: Int = 30,
+    ): String =
+        objectMapper.writeValueAsString(
+            mapOf(
+                "name" to name,
+                "discountType" to discountType,
+                "discountValue" to discountValue,
+                "totalQuantity" to totalQuantity,
+                "startAt" to startAt,
+                "endAt" to endAt,
+                "issueMode" to issueMode,
+                "couponValidityDays" to couponValidityDays,
+            ),
+        )
 
     private fun createCouponEvent(body: String, token: String = adminToken) =
         mockMvc.post("/api/admin/coupon-events") {
