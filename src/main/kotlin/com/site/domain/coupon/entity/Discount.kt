@@ -31,6 +31,18 @@ class Discount(
         }
     }
 
+    /**
+     * 주문 금액에 적용할 할인액. 할인액은 주문 금액을 넘지 않는다.
+     * 정률 할인은 원 단위 미만을 버린다. (Int 나눗셈은 소수점을 버린다)
+     */
+    fun calculate(orderAmount: Int): Int {
+        require(orderAmount > 0) { "orderAmount must be positive: $orderAmount" }
+        return when (type) {
+            DiscountType.FIXED_AMOUNT -> minOf(value, orderAmount)
+            DiscountType.PERCENTAGE -> (orderAmount.toLong() * value / 100).toInt()
+        }
+    }
+
     /** 사람이 읽는 표기. 5000 → "5,000원", 10 → "10%" */
     fun toDisplayText(): String =
         when (type) {

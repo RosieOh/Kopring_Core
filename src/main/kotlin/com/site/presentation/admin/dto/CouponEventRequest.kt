@@ -1,9 +1,11 @@
 package com.site.presentation.admin.dto
 
+import com.site.domain.coupon.entity.CouponEvent
 import com.site.domain.coupon.entity.CouponIssueMode
 import com.site.domain.coupon.entity.DiscountType
 import com.site.domain.coupon.service.CouponEventCommand
 import jakarta.validation.constraints.Max
+import jakarta.validation.constraints.Min
 import jakarta.validation.constraints.NotBlank
 import jakarta.validation.constraints.Positive
 import jakarta.validation.constraints.Size
@@ -35,6 +37,11 @@ data class CouponEventRequest(
 
     // 생략하면 즉시 발급. 시작 후에는 바꿀 수 없다.
     val issueMode: CouponIssueMode = CouponIssueMode.DIRECT,
+
+    // 발급 후 며칠 동안 쓸 수 있는지. 생략하면 30일
+    @field:Min(1)
+    @field:Max(365)
+    val couponValidityDays: Int = CouponEvent.DEFAULT_COUPON_VALIDITY_DAYS,
 )
 
 fun CouponEventRequest.toCommand(): CouponEventCommand =
@@ -46,4 +53,5 @@ fun CouponEventRequest.toCommand(): CouponEventCommand =
         startAt = startAt,
         endAt = endAt,
         issueMode = issueMode,
+        couponValidityDays = couponValidityDays,
     )

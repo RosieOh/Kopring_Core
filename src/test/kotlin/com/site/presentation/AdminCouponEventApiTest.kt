@@ -55,6 +55,16 @@ class AdminCouponEventApiTest @Autowired constructor(
                 jsonPath("$.data.totalQuantity") { value(100) }
                 jsonPath("$.data.remainingQuantity") { value(100) }
                 jsonPath("$.data.issueMode") { value("DIRECT") }
+                jsonPath("$.data.couponValidityDays") { value(30) }
+            }
+    }
+
+    @Test
+    fun `쿠폰 유효기간은 1일에서 365일 사이여야 한다`() {
+        createCouponEvent(couponEventBody(couponValidityDays = 0))
+            .andExpect {
+                status { isBadRequest() }
+                jsonPath("$.errors[0].field") { value("couponValidityDays") }
             }
     }
 
@@ -205,6 +215,7 @@ class AdminCouponEventApiTest @Autowired constructor(
         startAt: LocalDateTime = now.plusDays(1),
         endAt: LocalDateTime = now.plusDays(8),
         issueMode: String = "DIRECT",
+        couponValidityDays: Int = 30,
     ): String =
         objectMapper.writeValueAsString(
             mapOf(
@@ -215,6 +226,7 @@ class AdminCouponEventApiTest @Autowired constructor(
                 "startAt" to startAt,
                 "endAt" to endAt,
                 "issueMode" to issueMode,
+                "couponValidityDays" to couponValidityDays,
             ),
         )
 

@@ -78,6 +78,7 @@ class CouponEventTest {
             period = EventPeriod(startAt.plusDays(1), endAt.plusDays(1)),
             totalQuantity = 50,
             issueMode = CouponIssueMode.QUEUE,
+            couponValidityDays = 7,
             now = startAt.minusDays(1),
         )
 
@@ -85,6 +86,7 @@ class CouponEventTest {
         assertEquals(DiscountType.PERCENTAGE, couponEvent.discount.type)
         assertEquals(50, couponEvent.remainingQuantity)
         assertEquals(CouponIssueMode.QUEUE, couponEvent.issueMode)
+        assertEquals(startAt.plusDays(7), couponEvent.couponExpiresAt(issuedAt = startAt))
     }
 
     @Test
@@ -114,6 +116,7 @@ class CouponEventTest {
                 period = couponEvent.period,
                 totalQuantity = 50,
                 issueMode = couponEvent.issueMode,
+                couponValidityDays = couponEvent.couponValidityDays,
                 now = startAt,
             )
         }

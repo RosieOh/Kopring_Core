@@ -88,7 +88,8 @@ class CouponIssueService(
             findCouponEvent(couponEventId).checkIssuable(now)
             throw ServiceException(ErrorCode.COUPON_SOLD_OUT)
         }
-        return saveIssuedCoupon(couponEventId, memberId)
+        // 만료 시각 계산에 유효기간이 필요하다. UPDATE 는 영속성 컨텍스트를 거치지 않으므로 여기서 읽는 값은 최신이다.
+        return saveIssuedCoupon(findCouponEvent(couponEventId), memberId)
     }
 
     /**
@@ -106,7 +107,7 @@ class CouponIssueService(
     private fun issue(couponEvent: CouponEvent, memberId: Long): IssuedCoupon {
         checkNotIssued(couponEvent.id, memberId)
         couponEvent.issue(now())
-        return saveIssuedCoupon(couponEvent.id, memberId)
+        return saveIssuedCoupon(couponEvent, memberId)
     }
 
     private fun findCouponEvent(couponEventId: Long): CouponEvent =
@@ -121,9 +122,12 @@ class CouponIssueService(
 
     // 같은 회원의 동시 요청이 checkNotIssued 를 함께 통과해도 unique 제약이 막는다.
     // 예외가 나면 트랜잭션 전체가 롤백되므로 올려둔 issuedQuantity 도 함께 되돌아간다.
-    private fun saveIssuedCoupon(couponEventId: Long, memberId: Long): IssuedCoupon {
+    private fun saveIssuedCoupon(couponEvent: CouponEvent, memberId: Long): IssuedCoupon {
+        val couponEventId = couponEvent.id
         val issuedCoupon = try {
-            issuedCouponRepository.saveAndFlush(IssuedCoupon(couponEventId = couponEventId, memberId = memberId))
+            issuedCouponRepository.saveAndFlush(
+                IssuedCoupon(couponEventId = couponEventId, memberId = memberId, expiresAt = couponEvent.couponExpiresAt(now())),
+            )
         } catch (e: DataIntegrityViolationException) {
             throw ServiceException(ErrorCode.ALREADY_ISSUED_COUPON)
         }
