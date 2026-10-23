@@ -8,7 +8,6 @@ enum class CouponQueueResult(
     val closesQueue: Boolean,
 ) {
     ISSUED(closesQueue = false),
-    ALREADY_ISSUED(closesQueue = false),
     SOLD_OUT(closesQueue = true),
     ENDED(closesQueue = true),
     FAILED(closesQueue = false),

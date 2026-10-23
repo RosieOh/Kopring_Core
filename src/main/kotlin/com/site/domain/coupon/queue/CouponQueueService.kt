@@ -48,9 +48,10 @@ class CouponQueueService(
         couponQueueStore.findResult(couponEventId, memberId)
             ?.let { return CouponQueueStatus.Done(it) }
 
-        return couponQueueStore.rank(couponEventId, memberId)
-            ?.let { CouponQueueStatus.Waiting(position = it + 1) }
-            ?: CouponQueueStatus.NotInQueue
+        couponQueueStore.rank(couponEventId, memberId)
+            ?.let { return CouponQueueStatus.Waiting(position = it + 1) }
+
+        return if (couponQueueStore.isProcessing(couponEventId, memberId)) CouponQueueStatus.Processing else CouponQueueStatus.NotInQueue
     }
 
     private fun checkOngoing(couponEventId: Long) {
