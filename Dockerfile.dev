@@ -1,33 +1,28 @@
-# 1단계: Gradle로 빌드
-FROM gradle:8.5-jdk21 AS builder
+# 개발 서버용 이미지. 운영 이미지(Dockerfile)와 빌드는 같고, 실행 프로필과 JVM 옵션만 다르다.
+# 실행 프로필은 SPRING_PROFILES_ACTIVE 로 지정한다. (기본값 prod — 접속 정보는 환경변수로 넣는다)
 
-WORKDIR /app
-COPY . .
-
-# Plain JAR 제거 후 빌드
-RUN gradle clean build --no-daemon && \
-    rm -f build/libs/*-plain.jar
-
-# 2단계: JDK 21로 실행용 이미지 구성
-FROM openjdk:21-jdk-slim
-
-ENV TZ=Asia/Seoul
-RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
-
+# 1단계: 빌드 (테스트는 CI 담당)
+FROM eclipse-temurin:21-jdk AS builder
 WORKDIR /app
 
-# 빌드된 JAR 복사 (실행 가능한 JAR만)
-COPY --from=builder /app/build/libs/site-0.0.1-SNAPSHOT.jar app.jar
+COPY gradlew settings.gradle.kts build.gradle.kts ./
+COPY gradle gradle
+RUN ./gradlew dependencies --no-daemon > /dev/null
 
-# 애플리케이션 포트 노출
+COPY src src
+RUN ./gradlew bootJar -x test --no-daemon
+
+# 2단계: 실행
+FROM eclipse-temurin:21-jre
+WORKDIR /app
+
+ENV TZ=Asia/Seoul \
+    SPRING_PROFILES_ACTIVE=prod \
+    JAVA_OPTS="-Xms256m -Xmx512m -XX:+UseG1GC"
+
+RUN groupadd --system app && useradd --system --gid app app
+COPY --from=builder /app/build/libs/*.jar app.jar
+USER app
+
 EXPOSE 8080
-
-# JVM 옵션 설정 (개발 환경용)
-ENV JAVA_OPTS="-Xms256m -Xmx512m -XX:+UseG1GC -Duser.timezone=Asia/Seoul"
-
-ENTRYPOINT ["sh", "-c", "java $JAVA_OPTS -jar app.jar"]
-
-
-
-
-
+ENTRYPOINT ["sh", "-c", "exec java $JAVA_OPTS -jar app.jar"]
