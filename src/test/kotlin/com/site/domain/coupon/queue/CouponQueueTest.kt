@@ -3,8 +3,10 @@ package com.site.domain.coupon.queue
 import com.site.domain.coupon.entity.CouponIssueMode
 import com.site.domain.coupon.queue.CouponQueueResult.ISSUED
 import com.site.domain.coupon.queue.CouponQueueResult.SOLD_OUT
+import com.site.domain.coupon.queue.port.CouponQueueStore
 import com.site.domain.coupon.repository.CouponEventRepository
 import com.site.domain.coupon.repository.IssuedCouponRepository
+import com.site.domain.coupon.service.CouponIssueService
 import com.site.independent.error.exception.ServiceException
 import com.site.independent.type.ErrorCode
 import com.site.support.IntegrationTest
@@ -19,12 +21,16 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.data.redis.core.StringRedisTemplate
+import java.time.Clock
 import java.util.concurrent.ConcurrentHashMap
 
 @IntegrationTest
 class CouponQueueTest @Autowired constructor(
     private val couponQueueService: CouponQueueService,
     private val couponQueueWorker: CouponQueueWorker,
+    private val couponQueueStore: CouponQueueStore,
+    private val couponIssueService: CouponIssueService,
+    private val clock: Clock,
     private val couponEventRepository: CouponEventRepository,
     private val issuedCouponRepository: IssuedCouponRepository,
     private val redisTemplate: StringRedisTemplate,
@@ -104,6 +110,39 @@ class CouponQueueTest @Autowired constructor(
         val exception = assertThrows<ServiceException> { couponQueueService.enqueue(couponEventId, 1L) }
 
         assertEquals(ErrorCode.COUPON_EVENT_NOT_STARTED, exception.errorCode)
+    }
+
+    @Test
+    fun `처리하던 워커가 죽어도 lease 가 지나면 다음 워커가 이어서 처리하고, 이미 발급된 회원은 두 번 발급하지 않는다`() {
+        val couponEventId = ongoingCouponEvent(totalQuantity = 10)
+        (1L..3L).forEach { couponQueueService.enqueue(couponEventId, it) }
+
+        // 워커가 3명을 꺼낸 뒤 죽은 상황: lease 가 이미 지난 채로 "처리 중"에 남아 있다
+        couponQueueStore.claimNext(couponEventId, count = 3, leaseUntilMillis = clock.millis() - 1)
+        assertEquals(CouponQueueStatus.Processing, couponQueueService.getStatus(couponEventId, 1L))
+        // 그중 1번은 DB 발급까지 끝내고 결과를 기록하기 직전에 죽었다
+        couponIssueService.issueWithAtomicUpdate(couponEventId, 1L)
+
+        couponQueueWorker.processAll()
+
+        assertEquals(
+            List(3) { CouponQueueStatus.Done(ISSUED) },
+            (1L..3L).map { couponQueueService.getStatus(couponEventId, it) },
+        )
+        assertEquals(3L, issuedCouponRepository.countByCouponEventId(couponEventId))
+    }
+
+    @Test
+    fun `lease 가 남은 처리 중 회원은 다른 워커가 가져가지 않고, 다시 줄을 서도 처리 중으로 안내한다`() {
+        val couponEventId = ongoingCouponEvent(totalQuantity = 10)
+        couponQueueService.enqueue(couponEventId, 1L)
+        couponQueueStore.claimNext(couponEventId, count = 1, leaseUntilMillis = clock.millis() + 60_000)
+
+        couponQueueWorker.processAll()
+
+        assertEquals(CouponQueueStatus.Processing, couponQueueService.getStatus(couponEventId, 1L))
+        assertEquals(CouponQueueStatus.Processing, couponQueueService.enqueue(couponEventId, 1L))
+        assertEquals(0L, issuedCouponRepository.countByCouponEventId(couponEventId))
     }
 
     @Test

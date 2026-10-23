@@ -3,6 +3,7 @@ package com.site.domain.coupon.service
 import com.site.domain.coupon.event.CouponIssuedEvent
 import com.site.domain.coupon.repository.CouponEventRepository
 import com.site.domain.member.repository.MemberRepository
+import com.site.domain.notification.NotificationResult
 import com.site.domain.notification.port.AlimtalkMessage
 import com.site.domain.notification.port.AlimtalkSendResult
 import com.site.domain.notification.port.AlimtalkSender
@@ -12,23 +13,26 @@ import org.slf4j.LoggerFactory
 import org.springframework.data.repository.findByIdOrNull
 import org.springframework.stereotype.Service
 
+/**
+ * 쿠폰 발급 알림 한 건을 한 번 보내고 결과를 돌려준다.
+ * 언제 다시 보낼지(재시도)는 이 클래스가 아니라 Outbox(NotificationOutboxProcessor)가 정한다.
+ */
 @Service
 class CouponNotificationService(
     private val memberRepository: MemberRepository,
     private val couponEventRepository: CouponEventRepository,
     private val alimtalkSender: AlimtalkSender,
-    private val retryProperties: NotificationRetryProperties,
 ) {
 
     private val log = LoggerFactory.getLogger(javaClass)
 
-    fun notifyIssued(event: CouponIssuedEvent) {
+    fun notifyIssued(event: CouponIssuedEvent): NotificationResult {
         val member = memberRepository.findByIdOrNull(event.memberId)
-            ?: return log.warn("알림 대상 회원이 없습니다. {}", event)
+            ?: return NotificationResult.Skipped("회원이 없습니다")
         val phoneNumber = member.phoneNumber
-            ?: return log.info("휴대폰 번호가 없어 알림을 보내지 않습니다. memberId={}", member.id)
+            ?: return NotificationResult.Skipped("휴대폰 번호가 없습니다")
         val couponEvent = couponEventRepository.findByIdOrNull(event.couponEventId)
-            ?: return log.warn("알림 대상 쿠폰 이벤트가 없습니다. {}", event)
+            ?: return NotificationResult.Skipped("쿠폰 이벤트가 없습니다")
 
         val message = AlimtalkMessage(
             to = phoneNumber,
@@ -41,30 +45,15 @@ class CouponNotificationService(
         )
 
         // sealed 타입이라 두 경우를 빠뜨리면 컴파일 에러가 난다
-        when (val result = sendWithRetry(message)) {
-            is AlimtalkSendResult.Success ->
+        return when (val result = alimtalkSender.send(message)) {
+            AlimtalkSendResult.Success -> {
                 log.info("쿠폰 발급 알림톡 발송 완료. to={}, {}", phoneNumber.maskPhoneNumber(), event)
-
-            is AlimtalkSendResult.Failure ->
-                // 운영이라면 여기서 실패 내역을 테이블에 남기고 알람을 보낸다 (재발송 배치의 입력이 된다)
-                log.error("쿠폰 발급 알림톡 최종 실패. reason={}, {}", result.reason, event)
+                NotificationResult.Sent
+            }
+            is AlimtalkSendResult.Failure -> {
+                log.warn("쿠폰 발급 알림톡 발송 실패. retryable={}, reason={}, {}", result.retryable, result.reason, event)
+                NotificationResult.Failed(reason = result.reason, retryable = result.retryable)
+            }
         }
-    }
-
-    /**
-     * 재시도 가능한 실패일 때만, 최대 maxAttempts 번까지 보낸다.
-     * while 조건에서 result is Failure 를 확인하면, 같은 조건식 안의 result.retryable 은 스마트 캐스트로 바로 쓸 수 있다.
-     */
-    private fun sendWithRetry(message: AlimtalkMessage): AlimtalkSendResult {
-        var result = alimtalkSender.send(message)
-        var attempt = 1
-
-        while (result is AlimtalkSendResult.Failure && result.retryable && attempt < retryProperties.maxAttempts) {
-            log.warn("알림톡 발송 실패, 재시도합니다. attempt={}, reason={}", attempt, result.reason)
-            Thread.sleep(retryProperties.backoff.multipliedBy(attempt.toLong()).toMillis())
-            result = alimtalkSender.send(message)
-            attempt++
-        }
-        return result
     }
 }

@@ -6,19 +6,25 @@ import com.site.independent.error.exception.ServiceException
 import com.site.independent.type.ErrorCode
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Component
+import java.time.Clock
 
 /**
  * 대기열에서 앞사람부터 꺼내 실제로 발급한다. CouponQueueScheduler 가 주기적으로 부른다. (테스트에서는 직접 부른다)
  *
- * 발급은 원자적 UPDATE 방식을 쓴다. ZPOPMIN 덕분에 서버가 여러 대여도 한 회원을 두 번 처리하지 않고,
- * 원자적 UPDATE 덕분에 여러 워커가 동시에 발급해도 수량을 넘지 않는다.
- * (단, 워커가 여러 대면 배치끼리 동시에 처리되어 순번이 조금 뒤섞일 수 있다. 엄격한 순서가 필요하면 워커를 하나로 제한한다)
+ * 한 주기에 하는 일
+ * 1. lease 가 지난 "처리 중" 회원을 다시 처리한다 — 이전 워커가 꺼내 놓고 죽은 경우
+ * 2. 대기열이 닫혔으면 대기 중인 회원을 DB 를 거치지 않고 같은 결과로 정리한다
+ * 3. 앞에서부터 새로 꺼내 발급한다
+ *
+ * 같은 회원을 두 번 처리해도 안전하다. 발급은 1인 1매 제약이 있는 원자적 UPDATE 로 하므로,
+ * 이미 발급된 회원은 "이미 발급됨"이 되고 이를 ISSUED 로 기록한다. (멱등)
  */
 @Component
 class CouponQueueWorker(
     private val couponQueueStore: CouponQueueStore,
     private val couponIssueService: CouponIssueService,
     private val properties: CouponQueueProperties,
+    private val clock: Clock,
 ) {
 
     private val log = LoggerFactory.getLogger(javaClass)
@@ -31,29 +37,46 @@ class CouponQueueWorker(
     }
 
     private fun process(couponEventId: Long) {
+        val now = clock.millis()
+        val leaseUntil = now + properties.processingLease.toMillis()
+
+        val expired = couponQueueStore.claimExpired(couponEventId, now, properties.batchSize, leaseUntil)
+        if (expired.isNotEmpty()) {
+            log.warn("처리 중에 멈춘 회원 {}명을 다시 처리합니다. couponEventId={}", expired.size, couponEventId)
+            // 이미 발급까지 끝난 뒤 죽었을 수도 있으므로, 마감 여부와 상관없이 한 명씩 다시 발급을 시도해 결과를 확정한다
+            expired.forEach { memberId -> issueAndComplete(couponEventId, memberId) }
+        }
+
         couponQueueStore.closedReason(couponEventId)?.let { reason ->
             drain(couponEventId, reason)
             return
         }
 
-        val memberIds = couponQueueStore.popWaiting(couponEventId, properties.batchSize)
-        if (memberIds.isEmpty()) {
+        val claimed = couponQueueStore.claimNext(couponEventId, properties.batchSize, leaseUntil)
+        if (claimed.isEmpty() && expired.isEmpty()) {
             couponQueueStore.deactivateIfEmpty(couponEventId)
             return
         }
 
-        for ((index, memberId) in memberIds.withIndex()) {
-            val result = issue(couponEventId, memberId)
-            couponQueueStore.saveResults(couponEventId, listOf(memberId), result)
-
+        for ((index, memberId) in claimed.withIndex()) {
+            val result = issueAndComplete(couponEventId, memberId)
             if (result.closesQueue) {
-                // 대기열을 먼저 닫아 새로 줄 서는 것을 막은 뒤, 이번 배치의 남은 인원과 대기열 나머지를 같은 결과로 정리한다
-                couponQueueStore.close(couponEventId, result)
-                couponQueueStore.saveResults(couponEventId, memberIds.drop(index + 1), result)
+                // 새로 꺼낸 회원들은 발급 시도 전이라 같은 결과로 한 번에 정리해도 된다
+                couponQueueStore.complete(couponEventId, claimed.drop(index + 1), result)
                 drain(couponEventId, result)
                 return
             }
         }
+    }
+
+    private fun issueAndComplete(couponEventId: Long, memberId: Long): CouponQueueResult {
+        val result = issue(couponEventId, memberId)
+        couponQueueStore.complete(couponEventId, listOf(memberId), result)
+        if (result.closesQueue) {
+            // 대기열을 먼저 닫아 새로 줄 서는 것을 막는다
+            couponQueueStore.close(couponEventId, result)
+        }
+        return result
     }
 
     private fun issue(couponEventId: Long, memberId: Long): CouponQueueResult =
@@ -64,7 +87,8 @@ class CouponQueueWorker(
             when (e.errorCode) {
                 ErrorCode.COUPON_SOLD_OUT -> CouponQueueResult.SOLD_OUT
                 ErrorCode.COUPON_EVENT_ENDED -> CouponQueueResult.ENDED
-                ErrorCode.ALREADY_ISSUED_COUPON -> CouponQueueResult.ALREADY_ISSUED
+                // 대기열 이벤트의 쿠폰은 대기열로만 받을 수 있으므로, 이미 발급됐다면 이전 처리에서 받은 것이다
+                ErrorCode.ALREADY_ISSUED_COUPON -> CouponQueueResult.ISSUED
                 else -> CouponQueueResult.FAILED
             }
         } catch (e: Exception) {
@@ -73,12 +97,10 @@ class CouponQueueWorker(
         }
 
     private fun drain(couponEventId: Long, reason: CouponQueueResult) {
-        while (true) {
-            val memberIds = couponQueueStore.popWaiting(couponEventId, DRAIN_BATCH_SIZE)
-            if (memberIds.isEmpty()) break
-            couponQueueStore.saveResults(couponEventId, memberIds, reason)
+        while (couponQueueStore.drainWaiting(couponEventId, DRAIN_BATCH_SIZE, reason) > 0) {
+            // 대기 중인 회원이 없을 때까지 반복
         }
-        couponQueueStore.deactivate(couponEventId)
+        couponQueueStore.deactivateIfEmpty(couponEventId)
     }
 
     companion object {

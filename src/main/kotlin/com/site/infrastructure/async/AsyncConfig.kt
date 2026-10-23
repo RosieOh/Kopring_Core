@@ -16,7 +16,7 @@ class AsyncConfig {
     /**
      * 알림 발송 전용 스레드 풀. 외부 API 가 느려져도 다른 비동기 작업까지 막히지 않게 용도별로 나눈다.
      *
-     * 큐(1000)까지 가득 차면 알림은 버리고 경고만 남긴다.
+     * 큐(1000)까지 가득 차면 빠른 발송만 건너뛴다. 알림은 Outbox 에 남아 있어 스케줄러가 나중에 보낸다.
      * 기본 정책(AbortPolicy)이면 예외가 발급 요청 스레드로 터져서, 쿠폰은 발급됐는데 API 는 500 을 응답하게 된다.
      */
     @Bean(AsyncExecutors.NOTIFICATION)
@@ -26,7 +26,7 @@ class AsyncConfig {
             maxPoolSize = 8
             queueCapacity = 1_000
             setThreadNamePrefix("notification-")
-            setRejectedExecutionHandler { _, _ -> log.warn("알림 발송 큐가 가득 차서 알림 1건을 버렸습니다.") }
+            setRejectedExecutionHandler { _, _ -> log.warn("알림 발송 큐가 가득 차서 빠른 발송을 건너뜁니다. Outbox 스케줄러가 나중에 보냅니다.") }
             // 배포 등으로 종료될 때 이미 받은 알림 작업은 최대 10초까지 마저 처리한다
             setWaitForTasksToCompleteOnShutdown(true)
             setAwaitTerminationSeconds(10)
