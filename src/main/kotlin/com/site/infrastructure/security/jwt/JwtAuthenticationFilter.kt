@@ -1,8 +1,8 @@
 package com.site.infrastructure.security.jwt
 
+import com.site.domain.auth.port.AccessTokenBlacklist
 import com.site.independent.error.exception.ServiceException
 import com.site.independent.type.ErrorCode
-import com.site.infrastructure.redis.AccessTokenBlacklist
 import com.site.infrastructure.security.AuthMember
 import jakarta.servlet.FilterChain
 import jakarta.servlet.http.HttpServletRequest

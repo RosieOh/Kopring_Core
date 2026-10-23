@@ -70,6 +70,7 @@ dependencies {
     testImplementation("org.testcontainers:mysql")
     testImplementation("io.mockk:mockk:1.13.13")
     testImplementation("org.awaitility:awaitility-kotlin")
+    testImplementation("com.tngtech.archunit:archunit-junit5:1.3.0")
 }
 
 tasks.jar {

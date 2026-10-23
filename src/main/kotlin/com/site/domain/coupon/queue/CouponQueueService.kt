@@ -1,10 +1,11 @@
 package com.site.domain.coupon.queue
 
 import com.site.domain.coupon.entity.EventPeriod
+import com.site.domain.coupon.queue.port.CouponQueueStore
+import com.site.domain.coupon.queue.port.EnqueueResult
 import com.site.domain.coupon.repository.CouponEventRepository
 import com.site.independent.error.exception.ServiceException
 import com.site.independent.type.ErrorCode
-import com.site.infrastructure.redis.queue.CouponQueueRepository
 import org.springframework.data.repository.findByIdOrNull
 import org.springframework.stereotype.Service
 import java.time.Clock
@@ -18,7 +19,7 @@ import java.util.concurrent.ConcurrentHashMap
  */
 @Service
 class CouponQueueService(
-    private val couponQueueRepository: CouponQueueRepository,
+    private val couponQueueStore: CouponQueueStore,
     private val couponEventRepository: CouponEventRepository,
     private val clock: Clock,
 ) {
@@ -32,21 +33,21 @@ class CouponQueueService(
     fun enqueue(couponEventId: Long, memberId: Long): CouponQueueStatus {
         checkOngoing(couponEventId)
 
-        return when (val rank = couponQueueRepository.enqueue(couponEventId, memberId)) {
-            CouponQueueRepository.ALREADY_PROCESSED -> getStatus(couponEventId, memberId)
-            CouponQueueRepository.CLOSED -> throw ServiceException(closedErrorCode(couponEventId))
-            else -> {
-                couponQueueRepository.activate(couponEventId)
-                CouponQueueStatus.Waiting(position = rank + 1)
+        return when (val result = couponQueueStore.enqueue(couponEventId, memberId)) {
+            is EnqueueResult.Enqueued -> {
+                couponQueueStore.activate(couponEventId)
+                CouponQueueStatus.Waiting(position = result.rank + 1)
             }
+            EnqueueResult.AlreadyProcessed -> getStatus(couponEventId, memberId)
+            EnqueueResult.Closed -> throw ServiceException(closedErrorCode(couponEventId))
         }
     }
 
     fun getStatus(couponEventId: Long, memberId: Long): CouponQueueStatus {
-        couponQueueRepository.findResult(couponEventId, memberId)
+        couponQueueStore.findResult(couponEventId, memberId)
             ?.let { return CouponQueueStatus.Done(it) }
 
-        return couponQueueRepository.rank(couponEventId, memberId)
+        return couponQueueStore.rank(couponEventId, memberId)
             ?.let { CouponQueueStatus.Waiting(position = it + 1) }
             ?: CouponQueueStatus.NotInQueue
     }
@@ -69,7 +70,7 @@ class CouponQueueService(
     }
 
     private fun closedErrorCode(couponEventId: Long): ErrorCode =
-        when (couponQueueRepository.closedReason(couponEventId)) {
+        when (couponQueueStore.closedReason(couponEventId)) {
             CouponQueueResult.ENDED -> ErrorCode.COUPON_EVENT_ENDED
             else -> ErrorCode.COUPON_SOLD_OUT
         }

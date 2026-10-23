@@ -6,8 +6,8 @@ import com.site.domain.coupon.event.CouponIssuedEvent
 import com.site.domain.coupon.repository.CouponEventRepository
 import com.site.domain.coupon.repository.IssuedCouponRepository
 import com.site.independent.error.exception.ServiceException
+import com.site.independent.lock.DistributedLock
 import com.site.independent.type.ErrorCode
-import com.site.infrastructure.redis.lock.DistributedLock
 import org.springframework.context.ApplicationEventPublisher
 import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.data.repository.findByIdOrNull

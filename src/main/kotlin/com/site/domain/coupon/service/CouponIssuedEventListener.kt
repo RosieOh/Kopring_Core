@@ -1,7 +1,7 @@
 package com.site.domain.coupon.service
 
 import com.site.domain.coupon.event.CouponIssuedEvent
-import com.site.infrastructure.async.AsyncConfig
+import com.site.independent.config.AsyncExecutors
 import org.springframework.scheduling.annotation.Async
 import org.springframework.stereotype.Component
 import org.springframework.transaction.event.TransactionPhase
@@ -20,7 +20,7 @@ class CouponIssuedEventListener(
      * 반드시 보내야 하는 메시지라면 발급과 같은 트랜잭션에서 "보낼 메시지"를 테이블에 저장하고
      * 별도 워커가 보내는 Transactional Outbox 패턴을 쓴다.
      */
-    @Async(AsyncConfig.NOTIFICATION_EXECUTOR)
+    @Async(AsyncExecutors.NOTIFICATION)
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
     fun handle(event: CouponIssuedEvent) {
         couponNotificationService.notifyIssued(event)

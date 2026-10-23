@@ -3,11 +3,11 @@ package com.site.domain.coupon.service
 import com.site.domain.coupon.event.CouponIssuedEvent
 import com.site.domain.coupon.repository.CouponEventRepository
 import com.site.domain.member.repository.MemberRepository
-import com.site.infrastructure.biztalk.AlimtalkMessage
-import com.site.infrastructure.biztalk.AlimtalkSendResult
-import com.site.infrastructure.biztalk.AlimtalkSender
-import com.site.infrastructure.biztalk.BiztalkProperties
-import com.site.infrastructure.biztalk.maskPhoneNumber
+import com.site.domain.notification.port.AlimtalkMessage
+import com.site.domain.notification.port.AlimtalkSendResult
+import com.site.domain.notification.port.AlimtalkSender
+import com.site.domain.notification.port.AlimtalkTemplate
+import com.site.independent.util.maskPhoneNumber
 import org.slf4j.LoggerFactory
 import org.springframework.data.repository.findByIdOrNull
 import org.springframework.stereotype.Service
@@ -17,7 +17,6 @@ class CouponNotificationService(
     private val memberRepository: MemberRepository,
     private val couponEventRepository: CouponEventRepository,
     private val alimtalkSender: AlimtalkSender,
-    private val biztalkProperties: BiztalkProperties,
     private val retryProperties: NotificationRetryProperties,
 ) {
 
@@ -33,7 +32,7 @@ class CouponNotificationService(
 
         val message = AlimtalkMessage(
             to = phoneNumber,
-            templateId = biztalkProperties.couponIssuedTemplateId,
+            template = AlimtalkTemplate.COUPON_ISSUED,
             variables = mapOf(
                 "#{닉네임}" to member.nickname,
                 "#{이벤트명}" to couponEvent.name,

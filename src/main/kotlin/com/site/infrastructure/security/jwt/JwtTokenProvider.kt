@@ -1,5 +1,6 @@
 package com.site.infrastructure.security.jwt
 
+import com.site.domain.auth.port.TokenIssuer
 import com.site.domain.member.entity.MemberRole
 import com.site.independent.error.exception.ServiceException
 import com.site.independent.type.ErrorCode
@@ -23,13 +24,13 @@ import io.jsonwebtoken.security.SecurityException as JwtSecurityException
 @Component
 class JwtTokenProvider(
     private val jwtProperties: JwtProperties,
-) {
+) : TokenIssuer {
 
     private val secretKey: SecretKey = Keys.hmacShaKeyFor(Decoders.BASE64.decode(jwtProperties.secret))
     private val parser: JwtParser = Jwts.parser().verifyWith(secretKey).build()
     private val secureRandom = SecureRandom()
 
-    fun createAccessToken(memberId: Long, role: MemberRole): String {
+    override fun createAccessToken(memberId: Long, role: MemberRole): String {
         val now = Date()
         val expiration = Date(now.time + jwtProperties.accessTokenExpiration.toMillis())
 
@@ -48,7 +49,7 @@ class JwtTokenProvider(
      * Redis 에 저장된 값과 대조해야만 의미가 있으므로 토큰 안에 정보를 담을 필요가 없고,
      * 탈취되더라도 안에서 읽어낼 정보가 없다.
      */
-    fun createRefreshToken(): String {
+    override fun createRefreshToken(): String {
         val bytes = ByteArray(REFRESH_TOKEN_BYTES).also { secureRandom.nextBytes(it) }
         return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes)
     }

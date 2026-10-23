@@ -2,6 +2,8 @@ package com.site.infrastructure.redis.queue
 
 import com.site.domain.coupon.queue.CouponQueueProperties
 import com.site.domain.coupon.queue.CouponQueueResult
+import com.site.domain.coupon.queue.port.CouponQueueStore
+import com.site.domain.coupon.queue.port.EnqueueResult
 import org.springframework.data.redis.core.StringRedisTemplate
 import org.springframework.data.redis.core.script.DefaultRedisScript
 import org.springframework.stereotype.Repository
@@ -18,53 +20,55 @@ import org.springframework.stereotype.Repository
  * - coupon-queue:active        SET   대기열이 있는 이벤트 ID (워커가 순회할 대상)
  */
 @Repository
-class CouponQueueRepository(
+class RedisCouponQueueStore(
     private val redisTemplate: StringRedisTemplate,
     private val properties: CouponQueueProperties,
-) {
+) : CouponQueueStore {
 
     /**
-     * 줄을 세운다. 반환값: 0부터 시작하는 순위, 또는 [ALREADY_PROCESSED] / [CLOSED].
-     *
      * "결과 확인 → 마감 확인 → 이미 대기 중인지 확인 → 순번 발급 → 추가"를 Lua 로 묶어 Redis 안에서 한 번에 실행한다.
      * Redis 는 스크립트 하나를 실행하는 동안 다른 명령을 끼워 넣지 않으므로, 여러 서버에서 동시에 불러도 순번이 겹치거나 빠지지 않는다.
      */
-    fun enqueue(couponEventId: Long, memberId: Long): Long {
+    override fun enqueue(couponEventId: Long, memberId: Long): EnqueueResult {
         val keys = listOf(waitingKey(couponEventId), seqKey(couponEventId), resultKey(couponEventId), closedKey(couponEventId))
-        return requireNotNull(
+        val code = requireNotNull(
             redisTemplate.execute(ENQUEUE_SCRIPT, keys, memberId.toString(), properties.keyTtl.seconds.toString()),
         )
+        return when (code) {
+            ALREADY_PROCESSED -> EnqueueResult.AlreadyProcessed
+            CLOSED -> EnqueueResult.Closed
+            else -> EnqueueResult.Enqueued(rank = code)
+        }
     }
 
-    fun activate(couponEventId: Long) {
+    override fun activate(couponEventId: Long) {
         redisTemplate.opsForSet().add(ACTIVE_KEY, couponEventId.toString())
     }
 
-    fun activeEventIds(): Set<Long> = redisTemplate.opsForSet().members(ACTIVE_KEY).orEmpty().map { it.toLong() }.toSet()
+    override fun activeEventIds(): Set<Long> = redisTemplate.opsForSet().members(ACTIVE_KEY).orEmpty().map { it.toLong() }.toSet()
 
-    fun deactivate(couponEventId: Long) {
+    override fun deactivate(couponEventId: Long) {
         redisTemplate.opsForSet().remove(ACTIVE_KEY, couponEventId.toString())
     }
 
-    /** 비어 있으면 순회 대상에서 뺀다. 빼는 사이에 누가 들어왔다면 다시 넣는다. */
-    fun deactivateIfEmpty(couponEventId: Long) {
+    override fun deactivateIfEmpty(couponEventId: Long) {
         deactivate(couponEventId)
         if (waitingCount(couponEventId) > 0) {
             activate(couponEventId)
         }
     }
 
-    /** 앞에서부터 count 명을 꺼낸다. ZPOPMIN 은 꺼내기와 삭제가 원자적이라 서버가 여러 대여도 한 명을 두 번 꺼내지 않는다. */
-    fun popWaiting(couponEventId: Long, count: Long): List<Long> =
+    // ZPOPMIN 은 꺼내기와 삭제가 원자적이다
+    override fun popWaiting(couponEventId: Long, count: Long): List<Long> =
         redisTemplate.opsForZSet().popMin(waitingKey(couponEventId), count).orEmpty()
             .sortedBy { it.score }
             .mapNotNull { it.value?.toLong() }
 
-    fun waitingCount(couponEventId: Long): Long = redisTemplate.opsForZSet().zCard(waitingKey(couponEventId)) ?: 0
+    private fun waitingCount(couponEventId: Long): Long = redisTemplate.opsForZSet().zCard(waitingKey(couponEventId)) ?: 0
 
-    fun rank(couponEventId: Long, memberId: Long): Long? = redisTemplate.opsForZSet().rank(waitingKey(couponEventId), memberId.toString())
+    override fun rank(couponEventId: Long, memberId: Long): Long? = redisTemplate.opsForZSet().rank(waitingKey(couponEventId), memberId.toString())
 
-    fun saveResults(
+    override fun saveResults(
         couponEventId: Long,
         memberIds: List<Long>,
         result: CouponQueueResult,
@@ -75,15 +79,15 @@ class CouponQueueRepository(
         redisTemplate.expire(key, properties.keyTtl)
     }
 
-    fun findResult(couponEventId: Long, memberId: Long): CouponQueueResult? =
+    override fun findResult(couponEventId: Long, memberId: Long): CouponQueueResult? =
         redisTemplate.opsForHash<String, String>().get(resultKey(couponEventId), memberId.toString())
             ?.let { CouponQueueResult.valueOf(it) }
 
-    fun close(couponEventId: Long, reason: CouponQueueResult) {
+    override fun close(couponEventId: Long, reason: CouponQueueResult) {
         redisTemplate.opsForValue().set(closedKey(couponEventId), reason.name, properties.keyTtl)
     }
 
-    fun closedReason(couponEventId: Long): CouponQueueResult? =
+    override fun closedReason(couponEventId: Long): CouponQueueResult? =
         redisTemplate.opsForValue().get(closedKey(couponEventId))?.let { CouponQueueResult.valueOf(it) }
 
     private fun waitingKey(id: Long) = "coupon-queue:{$id}:waiting"
@@ -92,8 +96,9 @@ class CouponQueueRepository(
     private fun closedKey(id: Long) = "coupon-queue:{$id}:closed"
 
     companion object {
-        const val ALREADY_PROCESSED = -2L
-        const val CLOSED = -1L
+        // Lua 스크립트가 돌려주는 특수 값
+        private const val ALREADY_PROCESSED = -2L
+        private const val CLOSED = -1L
         private const val ACTIVE_KEY = "coupon-queue:active"
 
         // KEYS: waiting, seq, result, closed / ARGV: memberId, ttlSeconds

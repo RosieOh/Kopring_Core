@@ -40,7 +40,12 @@ class AuthController(
         @AuthenticationPrincipal authMember: AuthMember,
         @Valid @RequestBody request: RefreshTokenRequest,
     ): ResponseEntity<SuccessResponse<Nothing?>> {
-        authService.logout(authMember, request.refreshToken)
+        authService.logout(
+            memberId = authMember.memberId,
+            accessTokenId = authMember.tokenId,
+            accessTokenExpiresAt = authMember.tokenExpiresAt,
+            refreshToken = request.refreshToken,
+        )
         return SuccessCode.LOGOUT_SUCCESS.toResponseEntity()
     }
 }

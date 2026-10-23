@@ -1,5 +1,8 @@
 package com.site.infrastructure.biztalk
 
+import com.site.domain.notification.port.AlimtalkMessage
+import com.site.domain.notification.port.AlimtalkSendResult
+import com.site.domain.notification.port.AlimtalkSender
 import net.nurigo.sdk.NurigoApp
 import net.nurigo.sdk.message.exception.NurigoApiKeyException
 import net.nurigo.sdk.message.exception.NurigoBadRequestException
@@ -48,7 +51,7 @@ class SolapiAlimtalkSender(
             to = to,
             kakaoOptions = KakaoOption(
                 pfId = properties.pfId,
-                templateId = templateId,
+                templateId = properties.templateIdOf(template),
                 // Kotlin 은 읽기 전용 Map 과 MutableMap 을 타입으로 구분한다. SDK 가 MutableMap 을 요구해서 복사본을 넘긴다.
                 variables = variables.toMutableMap(),
             ),
