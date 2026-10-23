@@ -1,10 +1,17 @@
 package com.site.support
 
+import com.site.independent.config.ClockConfig
 import org.springframework.data.redis.core.StringRedisTemplate
+import java.time.LocalDateTime
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
+
+/**
+ * 서비스 시간대 기준의 현재 시각. 테스트 JVM 은 UTC 로 돌기 때문에 LocalDateTime.now() 를 쓰면 9시간 어긋난다.
+ */
+fun serviceNow(): LocalDateTime = LocalDateTime.now(ClockConfig.SERVICE_ZONE)
 
 /** 테스트 사이에 Redis 상태(대기열, 토큰 등)가 남지 않게 비운다. */
 fun StringRedisTemplate.flushDb() {

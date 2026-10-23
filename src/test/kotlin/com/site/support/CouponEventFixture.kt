@@ -10,8 +10,8 @@ import java.time.LocalDateTime
 fun couponEventFixture(
     name: String = "선착순 5천원 할인",
     discount: Discount = Discount(DiscountType.FIXED_AMOUNT, 5_000),
-    startAt: LocalDateTime = LocalDateTime.now().minusHours(1),
-    endAt: LocalDateTime = LocalDateTime.now().plusDays(1),
+    startAt: LocalDateTime = serviceNow().minusHours(1),
+    endAt: LocalDateTime = serviceNow().plusDays(1),
     totalQuantity: Int = 100,
 ): CouponEvent =
     CouponEvent(

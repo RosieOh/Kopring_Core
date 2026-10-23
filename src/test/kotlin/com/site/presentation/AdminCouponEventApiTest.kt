@@ -6,6 +6,7 @@ import com.site.domain.member.entity.MemberRole
 import com.site.domain.member.repository.MemberRepository
 import com.site.support.IntegrationTest
 import com.site.support.TestAuthHelper
+import com.site.support.serviceNow
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -29,7 +30,7 @@ class AdminCouponEventApiTest @Autowired constructor(
     private val testAuthHelper: TestAuthHelper,
 ) {
 
-    private val now = LocalDateTime.now().truncatedTo(ChronoUnit.SECONDS)
+    private val now = serviceNow().truncatedTo(ChronoUnit.SECONDS)
     private lateinit var adminToken: String
 
     @BeforeEach

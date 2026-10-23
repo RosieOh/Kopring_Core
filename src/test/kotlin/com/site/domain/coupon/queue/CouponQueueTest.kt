@@ -10,6 +10,7 @@ import com.site.support.IntegrationTest
 import com.site.support.couponEventFixture
 import com.site.support.flushDb
 import com.site.support.runConcurrently
+import com.site.support.serviceNow
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
@@ -17,7 +18,6 @@ import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.data.redis.core.StringRedisTemplate
-import java.time.LocalDateTime
 import java.util.concurrent.ConcurrentHashMap
 
 @IntegrationTest
@@ -97,7 +97,7 @@ class CouponQueueTest @Autowired constructor(
     @Test
     fun `시작 전 이벤트에는 줄을 설 수 없다`() {
         val couponEventId = couponEventRepository.save(
-            couponEventFixture(startAt = LocalDateTime.now().plusDays(1), endAt = LocalDateTime.now().plusDays(2)),
+            couponEventFixture(startAt = serviceNow().plusDays(1), endAt = serviceNow().plusDays(2)),
         ).id
 
         val exception = assertThrows<ServiceException> { couponQueueService.enqueue(couponEventId, 1L) }
