@@ -126,7 +126,7 @@ class MemberAuthApiTest @Autowired constructor(
     }
 
     @Test
-    fun `refresh token 으로 재발급하면 새 토큰 쌍을 주고, 한 번 쓴 refresh token 은 다시 못 쓴다`() {
+    fun `refresh token 으로 재발급하면 새 토큰 쌍을 주고, 한 번 쓴 refresh token 은 재사용으로 거절한다`() {
         signUp(email = "user@test.com", password = "password123", nickname = "tester")
         val tokens = loginAndGetTokens(email = "user@test.com", password = "password123")
 
@@ -143,8 +143,39 @@ class MemberAuthApiTest @Autowired constructor(
         reissue(tokens.refreshToken)
             .andExpect {
                 status { isUnauthorized() }
+                jsonPath("$.code") { value("REFRESH_TOKEN_REUSED") }
+            }
+    }
+
+    @Test
+    fun `이미 쓴 refresh token 이 다시 오면 같은 로그인에서 이어진 토큰이 모두 무효가 된다`() {
+        signUp(email = "user@test.com", password = "password123", nickname = "tester")
+        val stolen = loginAndGetTokens(email = "user@test.com", password = "password123")
+
+        // 공격자가 훔친 토큰으로 먼저 재발급을 받는다
+        val attackerTokens = reissue(stolen.refreshToken).andExpect { status { isOk() } }.andReturn().toTokens()
+
+        // 정상 사용자가 자기가 가진(이미 쓰인) 토큰으로 재발급을 시도 → 재사용 감지
+        reissue(stolen.refreshToken).andExpect { jsonPath("$.code") { value("REFRESH_TOKEN_REUSED") } }
+
+        // 공격자가 받아 간 새 토큰도 함께 폐기된다
+        reissue(attackerTokens.refreshToken)
+            .andExpect {
+                status { isUnauthorized() }
                 jsonPath("$.code") { value("INVALID_REFRESH_TOKEN") }
             }
+    }
+
+    @Test
+    fun `재사용이 감지돼도 다른 기기의 로그인은 유지된다`() {
+        signUp(email = "user@test.com", password = "password123", nickname = "tester")
+        val phone = loginAndGetTokens(email = "user@test.com", password = "password123")
+        val laptop = loginAndGetTokens(email = "user@test.com", password = "password123")
+
+        reissue(phone.refreshToken).andExpect { status { isOk() } }
+        reissue(phone.refreshToken).andExpect { jsonPath("$.code") { value("REFRESH_TOKEN_REUSED") } }
+
+        reissue(laptop.refreshToken).andExpect { status { isOk() } }
     }
 
     @Test
