@@ -215,21 +215,28 @@ class MemberAuthApiTest @Autowired constructor(
         }
     }
 
-    private data class Tokens(val accessToken: String, val refreshToken: String)
+    private data class Tokens(
+        val accessToken: String,
+        val refreshToken: String,
+    )
 
-    private fun signUp(email: String, password: String, nickname: String, phoneNumber: String? = null) =
-        mockMvc.post("/api/members") {
-            contentType = MediaType.APPLICATION_JSON
-            // buildMap: 조건에 따라 항목을 넣고 빼면서 읽기 전용 Map 을 만든다. (phoneNumber 가 없으면 키 자체를 뺀다)
-            content = objectMapper.writeValueAsString(
-                buildMap {
-                    put("email", email)
-                    put("password", password)
-                    put("nickname", nickname)
-                    phoneNumber?.let { put("phoneNumber", it) }
-                },
-            )
-        }
+    private fun signUp(
+        email: String,
+        password: String,
+        nickname: String,
+        phoneNumber: String? = null,
+    ) = mockMvc.post("/api/members") {
+        contentType = MediaType.APPLICATION_JSON
+        // buildMap: 조건에 따라 항목을 넣고 빼면서 읽기 전용 Map 을 만든다. (phoneNumber 가 없으면 키 자체를 뺀다)
+        content = objectMapper.writeValueAsString(
+            buildMap {
+                put("email", email)
+                put("password", password)
+                put("nickname", nickname)
+                phoneNumber?.let { put("phoneNumber", it) }
+            },
+        )
+    }
 
     private fun login(email: String, password: String) =
         mockMvc.post("/api/auth/login") {

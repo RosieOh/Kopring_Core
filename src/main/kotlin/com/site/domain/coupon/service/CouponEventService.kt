@@ -33,8 +33,7 @@ class CouponEventService(
         return couponEventRepository.save(couponEvent)
     }
 
-    fun getCouponEvents(pageable: Pageable): Page<CouponEvent> =
-        couponEventRepository.findAll(pageable)
+    fun getCouponEvents(pageable: Pageable): Page<CouponEvent> = couponEventRepository.findAll(pageable)
 
     fun getCouponEvent(couponEventId: Long): CouponEvent =
         couponEventRepository.findByIdOrNull(couponEventId)

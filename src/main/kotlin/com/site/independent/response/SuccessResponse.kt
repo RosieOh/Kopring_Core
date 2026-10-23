@@ -24,5 +24,4 @@ fun <T> SuccessCode.toResponseEntity(data: T): ResponseEntity<SuccessResponse<T>
     ResponseEntity.status(httpStatus).body(SuccessResponse.of(this, data))
 
 // 돌려줄 데이터가 없는 응답 ("data": null). Nothing? 는 null 하나만 담을 수 있는 타입이다.
-fun SuccessCode.toResponseEntity(): ResponseEntity<SuccessResponse<Nothing?>> =
-    toResponseEntity(null)
+fun SuccessCode.toResponseEntity(): ResponseEntity<SuccessResponse<Nothing?>> = toResponseEntity(null)

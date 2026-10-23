@@ -13,16 +13,14 @@ class JwtTokenProviderTest {
 
     private val secret = "a29wcmluZy1jb3JlLXRlc3Qtc2VjcmV0LWtleS1mb3ItanVuaXQtb25seS0wMTIzNDU2Nzg5"
 
-    private fun provider(
-        secret: String = this.secret,
-        expiration: Duration = Duration.ofMinutes(30),
-    ) = JwtTokenProvider(
-        JwtProperties(
-            secret = secret,
-            accessTokenExpiration = expiration,
-            refreshTokenExpiration = Duration.ofDays(14),
-        ),
-    )
+    private fun provider(secret: String = this.secret, expiration: Duration = Duration.ofMinutes(30)) =
+        JwtTokenProvider(
+            JwtProperties(
+                secret = secret,
+                accessTokenExpiration = expiration,
+                refreshTokenExpiration = Duration.ofDays(14),
+            ),
+        )
 
     @Test
     fun `발급한 토큰을 파싱하면 회원 ID와 권한이 그대로 나온다`() {

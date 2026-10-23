@@ -18,7 +18,12 @@ class MemberService(
 ) {
 
     @Transactional
-    fun signUp(email: String, rawPassword: String, nickname: String, phoneNumber: String? = null): Member {
+    fun signUp(
+        email: String,
+        rawPassword: String,
+        nickname: String,
+        phoneNumber: String? = null,
+    ): Member {
         if (memberRepository.existsByEmail(email)) {
             throw ServiceException(ErrorCode.DUPLICATE_EMAIL)
         }

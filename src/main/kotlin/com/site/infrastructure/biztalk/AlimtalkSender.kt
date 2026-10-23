@@ -28,9 +28,11 @@ sealed interface AlimtalkSendResult {
     data object Success : AlimtalkSendResult
 
     /** @property retryable 일시적인 오류(네트워크 등)라 다시 보내면 성공할 수 있는지 */
-    data class Failure(val reason: String, val retryable: Boolean) : AlimtalkSendResult
+    data class Failure(
+        val reason: String,
+        val retryable: Boolean,
+    ) : AlimtalkSendResult
 }
 
 /** 로그에 휴대폰 번호를 그대로 남기지 않는다. 01012345678 → 010****5678 */
-fun String.maskPhoneNumber(): String =
-    if (length < 8) "****" else take(3) + "****" + takeLast(4)
+fun String.maskPhoneNumber(): String = if (length < 8) "****" else take(3) + "****" + takeLast(4)

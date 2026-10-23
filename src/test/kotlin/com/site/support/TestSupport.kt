@@ -15,7 +15,11 @@ fun StringRedisTemplate.flushDb() {
  * task 를 taskCount 번, threadCount 개 스레드로 "동시에 출발"시켜 실행한다.
  * 작업 중 하나라도 예외가 나면 테스트를 실패시킨다.
  */
-fun runConcurrently(taskCount: Int, threadCount: Int = 32, task: (index: Int) -> Unit) {
+fun runConcurrently(
+    taskCount: Int,
+    threadCount: Int = 32,
+    task: (index: Int) -> Unit,
+) {
     val executor = Executors.newFixedThreadPool(threadCount)
     val startSignal = CountDownLatch(1)
     val doneSignal = CountDownLatch(taskCount)

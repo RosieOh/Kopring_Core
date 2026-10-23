@@ -6,7 +6,9 @@ import org.springframework.expression.spel.support.StandardEvaluationContext
 
 object CustomSpringELParser {
     fun getDynamicValue(
-        parameterNames: Array<String>, args: Array<Any>, key: String,
+        parameterNames: Array<String>,
+        args: Array<Any>,
+        key: String,
     ): Any {
         val parser: ExpressionParser = SpelExpressionParser()
         val context = StandardEvaluationContext()
