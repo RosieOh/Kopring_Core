@@ -6,10 +6,10 @@ import com.site.domain.coupon.entity.IssuedCoupon
 import com.site.domain.coupon.event.CouponIssuedEvent
 import com.site.domain.coupon.repository.CouponEventRepository
 import com.site.domain.coupon.repository.IssuedCouponRepository
+import com.site.domain.notification.service.NotificationOutboxService
 import com.site.independent.error.exception.ServiceException
 import com.site.independent.lock.DistributedLock
 import com.site.independent.type.ErrorCode
-import org.springframework.context.ApplicationEventPublisher
 import org.springframework.dao.DataIntegrityViolationException
 import org.springframework.data.repository.findByIdOrNull
 import org.springframework.stereotype.Service
@@ -31,7 +31,7 @@ import java.time.LocalDateTime
 class CouponIssueService(
     private val couponEventRepository: CouponEventRepository,
     private val issuedCouponRepository: IssuedCouponRepository,
-    private val eventPublisher: ApplicationEventPublisher,
+    private val notificationOutboxService: NotificationOutboxService,
     private val clock: Clock,
 ) {
 
@@ -128,8 +128,8 @@ class CouponIssueService(
             throw ServiceException(ErrorCode.ALREADY_ISSUED_COUPON)
         }
 
-        // 트랜잭션 안에서 발행하지만, 리스너(@TransactionalEventListener)는 커밋된 뒤에야 받는다
-        eventPublisher.publishEvent(
+        // 같은 트랜잭션에서 "보낼 알림"을 기록한다. 발급이 롤백되면 알림 기록도 함께 사라진다. (Transactional Outbox)
+        notificationOutboxService.recordCouponIssued(
             CouponIssuedEvent(issuedCouponId = issuedCoupon.id, couponEventId = couponEventId, memberId = memberId),
         )
         return issuedCoupon

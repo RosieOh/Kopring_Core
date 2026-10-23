@@ -4,6 +4,7 @@ import com.site.domain.coupon.event.CouponIssuedEvent
 import com.site.domain.coupon.repository.CouponEventRepository
 import com.site.domain.member.entity.Member
 import com.site.domain.member.repository.MemberRepository
+import com.site.domain.notification.NotificationResult
 import com.site.domain.notification.port.AlimtalkMessage
 import com.site.domain.notification.port.AlimtalkSendResult
 import com.site.domain.notification.port.AlimtalkSender
@@ -16,7 +17,6 @@ import io.mockk.verify
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
-import java.time.Duration
 import java.util.Optional
 
 class CouponNotificationServiceTest {
@@ -25,16 +25,9 @@ class CouponNotificationServiceTest {
     private val couponEventRepository = mockk<CouponEventRepository>()
     private val alimtalkSender = mockk<AlimtalkSender>()
 
-    private val couponNotificationService = CouponNotificationService(
-        memberRepository = memberRepository,
-        couponEventRepository = couponEventRepository,
-        alimtalkSender = alimtalkSender,
-        retryProperties = NotificationRetryProperties(maxAttempts = 3, backoff = Duration.ZERO),
-    )
+    private val couponNotificationService = CouponNotificationService(memberRepository, couponEventRepository, alimtalkSender)
 
     private val event = CouponIssuedEvent(issuedCouponId = 1L, couponEventId = 10L, memberId = 100L)
-
-    private val retryableFailure = AlimtalkSendResult.Failure(reason = "timeout", retryable = true)
 
     @BeforeEach
     fun setUp() {
@@ -48,8 +41,9 @@ class CouponNotificationServiceTest {
         val sent = slot<AlimtalkMessage>()
         every { alimtalkSender.send(capture(sent)) } returns AlimtalkSendResult.Success
 
-        couponNotificationService.notifyIssued(event)
+        val result = couponNotificationService.notifyIssued(event)
 
+        assertEquals(NotificationResult.Sent, result)
         assertEquals("01012345678", sent.captured.to)
         assertEquals(AlimtalkTemplate.COUPON_ISSUED, sent.captured.template)
         assertEquals(
@@ -59,38 +53,22 @@ class CouponNotificationServiceTest {
     }
 
     @Test
-    fun `일시적인 실패는 성공할 때까지 다시 보낸다`() {
-        every { alimtalkSender.send(any()) } returnsMany listOf(retryableFailure, retryableFailure, AlimtalkSendResult.Success)
+    fun `발송 실패는 재시도 가능 여부와 함께 돌려준다 (재시도는 Outbox 가 결정한다)`() {
+        every { alimtalkSender.send(any()) } returns AlimtalkSendResult.Failure(reason = "timeout", retryable = true)
 
-        couponNotificationService.notifyIssued(event)
+        val result = couponNotificationService.notifyIssued(event)
 
-        verify(exactly = 3) { alimtalkSender.send(any()) }
-    }
-
-    @Test
-    fun `계속 실패해도 최대 시도 횟수까지만 보낸다`() {
-        every { alimtalkSender.send(any()) } returns retryableFailure
-
-        couponNotificationService.notifyIssued(event)
-
-        verify(exactly = 3) { alimtalkSender.send(any()) }
-    }
-
-    @Test
-    fun `다시 보내도 소용없는 실패는 재시도하지 않는다`() {
-        every { alimtalkSender.send(any()) } returns AlimtalkSendResult.Failure(reason = "잘못된 수신번호", retryable = false)
-
-        couponNotificationService.notifyIssued(event)
-
+        assertEquals(NotificationResult.Failed(reason = "timeout", retryable = true), result)
         verify(exactly = 1) { alimtalkSender.send(any()) }
     }
 
     @Test
-    fun `휴대폰 번호가 없는 회원에게는 보내지 않는다`() {
+    fun `휴대폰 번호가 없는 회원에게는 보내지 않고 SKIPPED`() {
         every { memberRepository.findById(100L) } returns Optional.of(member(phoneNumber = null))
 
-        couponNotificationService.notifyIssued(event)
+        val result = couponNotificationService.notifyIssued(event)
 
+        assertEquals(NotificationResult.Skipped("휴대폰 번호가 없습니다"), result)
         verify(exactly = 0) { alimtalkSender.send(any()) }
     }
 
