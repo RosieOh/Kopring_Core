@@ -1,6 +1,7 @@
 package com.site.domain.coupon.service
 
 import com.site.domain.coupon.entity.CouponEvent
+import com.site.domain.coupon.entity.CouponIssueMode
 import com.site.domain.coupon.entity.IssuedCoupon
 import com.site.domain.coupon.event.CouponIssuedEvent
 import com.site.domain.coupon.repository.CouponEventRepository
@@ -65,6 +66,7 @@ class CouponIssueService(
     @DistributedLock(key = "'coupon-event:' + #couponEventId")
     fun issueWithDistributedLock(couponEventId: Long, memberId: Long): IssuedCoupon {
         val couponEvent = findCouponEvent(couponEventId)
+        couponEvent.checkIssueMode(CouponIssueMode.DIRECT)
         return issue(couponEvent, memberId)
     }
 
@@ -73,6 +75,8 @@ class CouponIssueService(
      * "남아 있으면 +1"을 DB 가 UPDATE 한 문장 안에서 처리한다. 읽은 값과 쓰는 값 사이에 틈이 없다.
      * (UPDATE 도 커밋까지 행 잠금을 쥐지만, 미리 읽는 단계가 없어 잠금 구간이 짧다)
      * 대신 발급 조건이 엔티티(CouponEvent.checkIssuable)와 쿼리 두 곳에 나뉘어 들어간다.
+     *
+     * 대기열 워커가 쓰는 방식이다. 발급 방식(QUEUE) 확인은 줄을 세울 때(CouponQueueService) 이미 했다.
      */
     @Transactional
     fun issueWithAtomicUpdate(couponEventId: Long, memberId: Long): IssuedCoupon {
@@ -93,7 +97,9 @@ class CouponIssueService(
      */
     @Transactional(readOnly = true)
     fun precheck(couponEventId: Long, memberId: Long) {
-        findCouponEvent(couponEventId).checkIssuable(now())
+        val couponEvent = findCouponEvent(couponEventId)
+        couponEvent.checkIssueMode(CouponIssueMode.DIRECT)
+        couponEvent.checkIssuable(now())
         checkNotIssued(couponEventId, memberId)
     }
 

@@ -1,5 +1,6 @@
 package com.site.domain.coupon.service
 
+import com.site.domain.coupon.entity.CouponIssueMode
 import com.site.domain.coupon.entity.Discount
 import com.site.domain.coupon.entity.DiscountType
 import com.site.domain.coupon.entity.EventPeriod
@@ -16,6 +17,7 @@ data class CouponEventCommand(
     val totalQuantity: Int,
     val startAt: LocalDateTime,
     val endAt: LocalDateTime,
+    val issueMode: CouponIssueMode,
 ) {
     fun toDiscount(): Discount = Discount(type = discountType, value = discountValue)
 

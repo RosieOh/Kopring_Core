@@ -1,5 +1,6 @@
 package com.site.presentation
 
+import com.site.domain.coupon.entity.CouponIssueMode
 import com.site.domain.coupon.queue.CouponQueueWorker
 import com.site.domain.coupon.repository.CouponEventRepository
 import com.site.domain.coupon.repository.IssuedCouponRepository
@@ -46,7 +47,7 @@ class CouponQueueApiTest @Autowired constructor(
 
     @Test
     fun `대기열에 등록하면 202와 순번을 받고, 워커가 처리하면 발급 완료 상태가 된다`() {
-        val couponEventId = couponEventRepository.save(couponEventFixture()).id
+        val couponEventId = couponEventRepository.save(couponEventFixture(issueMode = CouponIssueMode.QUEUE)).id
 
         mockMvc.post("/api/coupon-events/$couponEventId/queue") {
             header(HttpHeaders.AUTHORIZATION, "Bearer $token")
@@ -67,11 +68,23 @@ class CouponQueueApiTest @Autowired constructor(
 
     @Test
     fun `줄을 서지 않았으면 NOT_IN_QUEUE`() {
-        val couponEventId = couponEventRepository.save(couponEventFixture()).id
+        val couponEventId = couponEventRepository.save(couponEventFixture(issueMode = CouponIssueMode.QUEUE)).id
 
         getMyStatus(couponEventId).andExpect {
             status { isOk() }
             jsonPath("$.data.state") { value("NOT_IN_QUEUE") }
+        }
+    }
+
+    @Test
+    fun `즉시 발급 이벤트에 줄을 서려 하면 400 DIRECT_ONLY_COUPON_EVENT`() {
+        val couponEventId = couponEventRepository.save(couponEventFixture(issueMode = CouponIssueMode.DIRECT)).id
+
+        mockMvc.post("/api/coupon-events/$couponEventId/queue") {
+            header(HttpHeaders.AUTHORIZATION, "Bearer $token")
+        }.andExpect {
+            status { isBadRequest() }
+            jsonPath("$.code") { value("DIRECT_ONLY_COUPON_EVENT") }
         }
     }
 
