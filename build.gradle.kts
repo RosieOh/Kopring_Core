@@ -24,12 +24,6 @@ java {
     }
 }
 
-configurations {
-    compileOnly {
-        extendsFrom(configurations.annotationProcessor.get())
-    }
-}
-
 repositories {
     mavenCentral()
 }
@@ -59,10 +53,16 @@ dependencies {
 
     implementation("net.nurigo:sdk:4.3.0")
 
+    implementation("org.flywaydb:flyway-core")
+    implementation("org.flywaydb:flyway-mysql")
+
     runtimeOnly("com.mysql:mysql-connector-j")
     runtimeOnly("io.micrometer:micrometer-registry-prometheus")
 
-    annotationProcessor("org.springframework.boot:spring-boot-configuration-processor")
+    // Redisson(Netty)이 macOS DNS 설정을 읽는 네이티브 라이브러리. classifier 가 없으면 빈 jar 만 받아진다.
+    // 버전은 Spring Boot 가 관리하는 Netty 버전을 따른다.
+    runtimeOnly("io.netty:netty-resolver-dns-native-macos::osx-aarch_64")
+    runtimeOnly("io.netty:netty-resolver-dns-native-macos::osx-x86_64")
 
     testImplementation("org.springframework.boot:spring-boot-starter-test")
     testImplementation("org.springframework.security:spring-security-test")
@@ -70,8 +70,6 @@ dependencies {
     testImplementation("org.testcontainers:mysql")
     testImplementation("io.mockk:mockk:1.13.13")
     testImplementation("org.awaitility:awaitility-kotlin")
-
-    runtimeOnly("io.netty:netty-resolver-dns-native-macos:4.1.115.Final")
 }
 
 tasks.jar {
@@ -80,10 +78,8 @@ tasks.jar {
 
 tasks.named<Test>("test") {
     useJUnitPlatform()
-}
-
-tasks.withType<JavaCompile> {
-    options.compilerArgs.add("-parameters")
+    // 운영 서버(UTC)와 같은 조건으로 돌린다. 서버 시간대에 기대는 코드가 생기면 테스트가 깨진다.
+    jvmArgs("-Duser.timezone=UTC")
 }
 
 kotlin {
