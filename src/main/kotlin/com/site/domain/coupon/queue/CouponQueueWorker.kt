@@ -1,9 +1,9 @@
 package com.site.domain.coupon.queue
 
+import com.site.domain.coupon.queue.port.CouponQueueStore
 import com.site.domain.coupon.service.CouponIssueService
 import com.site.independent.error.exception.ServiceException
 import com.site.independent.type.ErrorCode
-import com.site.infrastructure.redis.queue.CouponQueueRepository
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Component
 
@@ -16,7 +16,7 @@ import org.springframework.stereotype.Component
  */
 @Component
 class CouponQueueWorker(
-    private val couponQueueRepository: CouponQueueRepository,
+    private val couponQueueStore: CouponQueueStore,
     private val couponIssueService: CouponIssueService,
     private val properties: CouponQueueProperties,
 ) {
@@ -24,32 +24,32 @@ class CouponQueueWorker(
     private val log = LoggerFactory.getLogger(javaClass)
 
     fun processAll() {
-        couponQueueRepository.activeEventIds().forEach { couponEventId ->
+        couponQueueStore.activeEventIds().forEach { couponEventId ->
             runCatching { process(couponEventId) }
                 .onFailure { log.error("대기열 처리 중 오류. couponEventId={}", couponEventId, it) }
         }
     }
 
     private fun process(couponEventId: Long) {
-        couponQueueRepository.closedReason(couponEventId)?.let { reason ->
+        couponQueueStore.closedReason(couponEventId)?.let { reason ->
             drain(couponEventId, reason)
             return
         }
 
-        val memberIds = couponQueueRepository.popWaiting(couponEventId, properties.batchSize)
+        val memberIds = couponQueueStore.popWaiting(couponEventId, properties.batchSize)
         if (memberIds.isEmpty()) {
-            couponQueueRepository.deactivateIfEmpty(couponEventId)
+            couponQueueStore.deactivateIfEmpty(couponEventId)
             return
         }
 
         for ((index, memberId) in memberIds.withIndex()) {
             val result = issue(couponEventId, memberId)
-            couponQueueRepository.saveResults(couponEventId, listOf(memberId), result)
+            couponQueueStore.saveResults(couponEventId, listOf(memberId), result)
 
             if (result.closesQueue) {
                 // 대기열을 먼저 닫아 새로 줄 서는 것을 막은 뒤, 이번 배치의 남은 인원과 대기열 나머지를 같은 결과로 정리한다
-                couponQueueRepository.close(couponEventId, result)
-                couponQueueRepository.saveResults(couponEventId, memberIds.drop(index + 1), result)
+                couponQueueStore.close(couponEventId, result)
+                couponQueueStore.saveResults(couponEventId, memberIds.drop(index + 1), result)
                 drain(couponEventId, result)
                 return
             }
@@ -74,11 +74,11 @@ class CouponQueueWorker(
 
     private fun drain(couponEventId: Long, reason: CouponQueueResult) {
         while (true) {
-            val memberIds = couponQueueRepository.popWaiting(couponEventId, DRAIN_BATCH_SIZE)
+            val memberIds = couponQueueStore.popWaiting(couponEventId, DRAIN_BATCH_SIZE)
             if (memberIds.isEmpty()) break
-            couponQueueRepository.saveResults(couponEventId, memberIds, reason)
+            couponQueueStore.saveResults(couponEventId, memberIds, reason)
         }
-        couponQueueRepository.deactivate(couponEventId)
+        couponQueueStore.deactivate(couponEventId)
     }
 
     companion object {

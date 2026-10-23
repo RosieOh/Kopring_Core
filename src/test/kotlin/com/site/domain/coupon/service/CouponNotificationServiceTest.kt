@@ -4,10 +4,10 @@ import com.site.domain.coupon.event.CouponIssuedEvent
 import com.site.domain.coupon.repository.CouponEventRepository
 import com.site.domain.member.entity.Member
 import com.site.domain.member.repository.MemberRepository
-import com.site.infrastructure.biztalk.AlimtalkMessage
-import com.site.infrastructure.biztalk.AlimtalkSendResult
-import com.site.infrastructure.biztalk.AlimtalkSender
-import com.site.infrastructure.biztalk.BiztalkProperties
+import com.site.domain.notification.port.AlimtalkMessage
+import com.site.domain.notification.port.AlimtalkSendResult
+import com.site.domain.notification.port.AlimtalkSender
+import com.site.domain.notification.port.AlimtalkTemplate
 import com.site.support.couponEventFixture
 import io.mockk.every
 import io.mockk.mockk
@@ -29,7 +29,6 @@ class CouponNotificationServiceTest {
         memberRepository = memberRepository,
         couponEventRepository = couponEventRepository,
         alimtalkSender = alimtalkSender,
-        biztalkProperties = BiztalkProperties(couponIssuedTemplateId = "COUPON_ISSUED"),
         retryProperties = NotificationRetryProperties(maxAttempts = 3, backoff = Duration.ZERO),
     )
 
@@ -52,7 +51,7 @@ class CouponNotificationServiceTest {
         couponNotificationService.notifyIssued(event)
 
         assertEquals("01012345678", sent.captured.to)
-        assertEquals("COUPON_ISSUED", sent.captured.templateId)
+        assertEquals(AlimtalkTemplate.COUPON_ISSUED, sent.captured.template)
         assertEquals(
             mapOf("#{닉네임}" to "로지", "#{이벤트명}" to "오픈 기념", "#{할인}" to "5,000원"),
             sent.captured.variables,

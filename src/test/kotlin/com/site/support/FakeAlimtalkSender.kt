@@ -1,8 +1,8 @@
 package com.site.support
 
-import com.site.infrastructure.biztalk.AlimtalkMessage
-import com.site.infrastructure.biztalk.AlimtalkSendResult
-import com.site.infrastructure.biztalk.AlimtalkSender
+import com.site.domain.notification.port.AlimtalkMessage
+import com.site.domain.notification.port.AlimtalkSendResult
+import com.site.domain.notification.port.AlimtalkSender
 import org.springframework.boot.test.context.TestComponent
 import org.springframework.context.annotation.Primary
 import java.time.Duration

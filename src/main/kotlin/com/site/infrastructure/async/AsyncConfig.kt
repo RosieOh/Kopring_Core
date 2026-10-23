@@ -1,5 +1,6 @@
 package com.site.infrastructure.async
 
+import com.site.independent.config.AsyncExecutors
 import org.slf4j.LoggerFactory
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
@@ -18,7 +19,7 @@ class AsyncConfig {
      * 큐(1000)까지 가득 차면 알림은 버리고 경고만 남긴다.
      * 기본 정책(AbortPolicy)이면 예외가 발급 요청 스레드로 터져서, 쿠폰은 발급됐는데 API 는 500 을 응답하게 된다.
      */
-    @Bean(NOTIFICATION_EXECUTOR)
+    @Bean(AsyncExecutors.NOTIFICATION)
     fun notificationExecutor(): ThreadPoolTaskExecutor =
         ThreadPoolTaskExecutor().apply {
             corePoolSize = 4
@@ -30,8 +31,4 @@ class AsyncConfig {
             setWaitForTasksToCompleteOnShutdown(true)
             setAwaitTerminationSeconds(10)
         }
-
-    companion object {
-        const val NOTIFICATION_EXECUTOR = "notificationExecutor"
-    }
 }

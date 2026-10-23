@@ -1,5 +1,6 @@
 package com.site.infrastructure.redis
 
+import com.site.domain.auth.port.RefreshTokenStore
 import com.site.infrastructure.security.jwt.JwtProperties
 import org.springframework.data.redis.core.StringRedisTemplate
 import org.springframework.stereotype.Repository
@@ -13,21 +14,21 @@ import java.util.HexFormat
  * 기기마다 다른 refresh token 이 생기므로 여러 기기 동시 로그인이 자연스럽게 지원된다.
  */
 @Repository
-class RefreshTokenRepository(
+class RedisRefreshTokenStore(
     private val redisTemplate: StringRedisTemplate,
     private val jwtProperties: JwtProperties,
-) {
+) : RefreshTokenStore {
 
-    fun save(refreshToken: String, memberId: Long) {
+    override fun save(refreshToken: String, memberId: Long) {
         redisTemplate.opsForValue().set(key(refreshToken), memberId.toString(), jwtProperties.refreshTokenExpiration)
     }
 
-    fun findMemberId(refreshToken: String): Long? = redisTemplate.opsForValue().get(key(refreshToken))?.toLong()
+    override fun findMemberId(refreshToken: String): Long? = redisTemplate.opsForValue().get(key(refreshToken))?.toLong()
 
-    /** 조회와 삭제를 Redis GETDEL 한 번으로 처리한다. 같은 토큰은 딱 한 번만 꺼낼 수 있다. */
-    fun consume(refreshToken: String): Long? = redisTemplate.opsForValue().getAndDelete(key(refreshToken))?.toLong()
+    /** Redis GETDEL 한 번으로 조회와 삭제를 함께 처리한다. */
+    override fun consume(refreshToken: String): Long? = redisTemplate.opsForValue().getAndDelete(key(refreshToken))?.toLong()
 
-    fun delete(refreshToken: String) {
+    override fun delete(refreshToken: String) {
         redisTemplate.delete(key(refreshToken))
     }
 
