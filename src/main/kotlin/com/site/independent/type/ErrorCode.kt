@@ -16,6 +16,7 @@ enum class ErrorCode(
     UNSUPPORTED_TOKEN(401, "UNSUPPORTED_TOKEN", "지원하지 않는 토큰입니다."),
     LOGGED_OUT_TOKEN(401, "LOGGED_OUT_TOKEN", "로그아웃된 토큰입니다."),
     INVALID_REFRESH_TOKEN(401, "INVALID_REFRESH_TOKEN", "유효하지 않은 리프레시 토큰입니다."),
+    REFRESH_TOKEN_REUSED(401, "REFRESH_TOKEN_REUSED", "이미 사용된 리프레시 토큰입니다. 보안을 위해 다시 로그인해주세요."),
     EMPTY_AUTHENTICATION(401, "EMPTY_AUTHENTICATION", "인증정보가 존재하지 않습니다."),
     INVALID_CREDENTIALS(401, "INVALID_CREDENTIALS", "이메일 또는 비밀번호가 올바르지 않습니다."),
     ROLE_FORBIDDEN(403, "ROLE_FORBIDDEN", "액세스할 수 있는 권한이 아닙니다."),
