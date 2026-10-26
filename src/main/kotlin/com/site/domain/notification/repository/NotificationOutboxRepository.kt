@@ -10,6 +10,8 @@ import java.time.LocalDateTime
 
 interface NotificationOutboxRepository : JpaRepository<NotificationOutbox, Long> {
 
+    fun countByStatus(status: OutboxStatus): Long
+
     @Query("select o.id from NotificationOutbox o where o.status = :status and o.nextAttemptAt <= :now order by o.id")
     fun findDueIds(
         status: OutboxStatus,

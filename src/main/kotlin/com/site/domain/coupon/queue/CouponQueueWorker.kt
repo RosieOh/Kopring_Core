@@ -1,6 +1,7 @@
 package com.site.domain.coupon.queue
 
 import com.site.domain.coupon.queue.port.CouponQueueStore
+import com.site.domain.coupon.service.CouponIssueMetrics
 import com.site.domain.coupon.service.CouponIssueService
 import com.site.independent.error.exception.ServiceException
 import com.site.independent.type.ErrorCode
@@ -24,6 +25,8 @@ class CouponQueueWorker(
     private val couponQueueStore: CouponQueueStore,
     private val couponIssueService: CouponIssueService,
     private val properties: CouponQueueProperties,
+    private val issueMetrics: CouponIssueMetrics,
+    private val queueMetrics: CouponQueueMetrics,
     private val clock: Clock,
 ) {
 
@@ -34,6 +37,7 @@ class CouponQueueWorker(
             runCatching { process(couponEventId) }
                 .onFailure { log.error("대기열 처리 중 오류. couponEventId={}", couponEventId, it) }
         }
+        queueMetrics.refresh(couponQueueStore.activeEventIds())
     }
 
     private fun process(couponEventId: Long) {
@@ -62,7 +66,9 @@ class CouponQueueWorker(
             val result = issueAndComplete(couponEventId, memberId)
             if (result.closesQueue) {
                 // 새로 꺼낸 회원들은 발급 시도 전이라 같은 결과로 한 번에 정리해도 된다
-                couponQueueStore.complete(couponEventId, claimed.drop(index + 1), result)
+                val rest = claimed.drop(index + 1)
+                couponQueueStore.complete(couponEventId, rest, result)
+                if (rest.isNotEmpty()) issueMetrics.recordQueue(result, count = rest.size.toLong())
                 drain(couponEventId, result)
                 return
             }
@@ -72,6 +78,7 @@ class CouponQueueWorker(
     private fun issueAndComplete(couponEventId: Long, memberId: Long): CouponQueueResult {
         val result = issue(couponEventId, memberId)
         couponQueueStore.complete(couponEventId, listOf(memberId), result)
+        issueMetrics.recordQueue(result)
         if (result.closesQueue) {
             // 대기열을 먼저 닫아 새로 줄 서는 것을 막는다
             couponQueueStore.close(couponEventId, result)
@@ -97,9 +104,10 @@ class CouponQueueWorker(
         }
 
     private fun drain(couponEventId: Long, reason: CouponQueueResult) {
-        while (couponQueueStore.drainWaiting(couponEventId, DRAIN_BATCH_SIZE, reason) > 0) {
-            // 대기 중인 회원이 없을 때까지 반복
-        }
+        do {
+            val drained = couponQueueStore.drainWaiting(couponEventId, DRAIN_BATCH_SIZE, reason)
+            if (drained > 0) issueMetrics.recordQueue(reason, count = drained)
+        } while (drained > 0)
         couponQueueStore.deactivateIfEmpty(couponEventId)
     }
 
