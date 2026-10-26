@@ -29,6 +29,15 @@
       "description": "대기열 워커 스케줄러 설정"
     },
     {
+      "name": "coupon.queue.polling",
+      "type": "com.site.domain.coupon.queue.CouponQueuePollingProperties",
+      "description": "대기열 상태 조회 간격 힌트(retryAfterMillis) 설정"
+    },
+    {
+      "name": "coupon.queue.stream.scheduler",
+      "description": "대기열 SSE 상태 전송 스케줄러 설정"
+    },
+    {
       "name": "admin.init",
       "description": "local 프로필에서 기동 시 만드는 관리자 계정 (LocalAdminInitializer)"
     }
@@ -152,6 +161,36 @@
       "type": "java.lang.Long",
       "defaultValue": 200,
       "description": "대기열 워커 실행 간격(ms). 이전 실행이 끝난 뒤부터 잰다."
+    },
+    {
+      "name": "coupon.queue.polling.min-interval",
+      "type": "java.time.Duration",
+      "defaultValue": "300ms",
+      "description": "다음 조회까지 최소 대기 시간 (처리 중이거나 다음 배치 순번)."
+    },
+    {
+      "name": "coupon.queue.polling.max-interval",
+      "type": "java.time.Duration",
+      "defaultValue": "3s",
+      "description": "다음 조회까지 최대 대기 시간 (뒤 순번)."
+    },
+    {
+      "name": "coupon.queue.polling.estimated-throughput-per-second",
+      "type": "java.lang.Long",
+      "defaultValue": 500,
+      "description": "워커가 1초에 발급하는 인원 추정치. 예상 대기 시간 계산에 쓴다."
+    },
+    {
+      "name": "coupon.queue.stream.scheduler.enabled",
+      "type": "java.lang.Boolean",
+      "defaultValue": true,
+      "description": "대기열 SSE 상태 전송 스케줄러 사용 여부. 테스트에서는 끈다."
+    },
+    {
+      "name": "coupon.queue.stream.scheduler.interval-millis",
+      "type": "java.lang.Long",
+      "defaultValue": 500,
+      "description": "SSE 로 연결된 사용자의 상태를 확인하는 간격(ms)."
     },
     {
       "name": "admin.init.email",
