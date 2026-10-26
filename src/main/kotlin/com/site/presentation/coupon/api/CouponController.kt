@@ -52,7 +52,10 @@ class CouponController(
         return SuccessCode.GET_COUPON_EVENTS_SUCCESS.toResponseEntity(events.toPageResponse { it.toSummaryResponse(now) })
     }
 
-    /** 즉시 발급 (분산락 + 사전 검사) */
+    /**
+     * 즉시 발급. 사전 검사(메모리 캐시) → 동시 실행 제한 → 설정한 방식(coupon.issue.direct-strategy, 기본 원자적 UPDATE)으로 발급한다.
+     * 흐름은 CouponIssueFacade 참고.
+     */
     @PostMapping("/{couponEventId}/issue")
     fun issue(
         @PathVariable couponEventId: Long,
