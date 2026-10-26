@@ -12,7 +12,12 @@ import io.kotest.datatest.withData
 import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
 import io.kotest.matchers.string.shouldMatch
+import io.mockk.every
+import io.mockk.mockk
+import java.time.Clock
 import java.time.Duration
+import java.time.Instant
+import java.time.ZoneOffset
 import java.util.Date
 
 class JwtTokenProviderTest : FunSpec({
@@ -20,14 +25,35 @@ class JwtTokenProviderTest : FunSpec({
     val secret = "a29wcmluZy1jb3JlLXRlc3Qtc2VjcmV0LWtleS1mb3ItanVuaXQtb25seS0wMTIzNDU2Nzg5"
     val otherSecret = "b3RoZXIta29wcmluZy1zZWNyZXQta2V5LWZvci1zaWduYXR1cmUtdGVzdC0wMTIzNDU2"
 
+    // 서비스 Clock 을 흉내 낸 시계. now 를 바꾸면 발급 시각과 만료 판단이 함께 움직인다
+    val issuedAt = Instant.parse("2026-10-26T03:00:00Z")
+    var now = issuedAt
+    val clock = mockk<Clock> {
+        every { instant() } answers { now }
+        every { zone } returns ZoneOffset.UTC
+    }
+
     fun provider(signingKey: String = secret, expiration: Duration = Duration.ofMinutes(30)) =
-        JwtTokenProvider(JwtProperties(secret = signingKey, accessTokenExpiration = expiration, refreshTokenExpiration = Duration.ofDays(14)))
+        JwtTokenProvider(
+            JwtProperties(secret = signingKey, accessTokenExpiration = expiration, refreshTokenExpiration = Duration.ofDays(14)),
+            clock,
+        )
 
     test("발급한 토큰을 파싱하면 회원 ID 와 권한이 그대로 나온다") {
         val authMember = provider().parseAccessToken(provider().createAccessToken(memberId = 1L, role = MemberRole.ADMIN))
 
         authMember.memberId shouldBe 1L
         authMember.role shouldBe MemberRole.ADMIN
+    }
+
+    test("만료 검증은 서비스 Clock 을 따른다 — 만료 1초 전에는 통과하고, 1초 뒤에는 EXPIRED_TOKEN") {
+        val token = provider().createAccessToken(memberId = 1L, role = MemberRole.USER) // 30분짜리
+
+        now = issuedAt + Duration.ofMinutes(30) - Duration.ofSeconds(1)
+        provider().parseAccessToken(token).memberId shouldBe 1L
+
+        now = issuedAt + Duration.ofMinutes(30) + Duration.ofSeconds(1)
+        shouldThrow<ServiceException> { provider().parseAccessToken(token) }.errorCode shouldBe ErrorCode.EXPIRED_TOKEN
     }
 
     test("access token 마다 고유한 토큰 ID 가 붙는다 (로그아웃 블랙리스트의 키)") {
@@ -55,7 +81,7 @@ class JwtTokenProviderTest : FunSpec({
             .apply { subject?.let { subject(it) } }
             .apply { role?.let { claim("role", it) } }
             .apply { id?.let { id(it) } }
-            .apply { expiresInSeconds?.let { expiration(Date(System.currentTimeMillis() + it * 1_000)) } }
+            .apply { expiresInSeconds?.let { expiration(Date.from(now.plusSeconds(it))) } }
             .signWith(Keys.hmacShaKeyFor(Decoders.BASE64.decode(secret)))
             .compact()
 

@@ -3,6 +3,7 @@ package com.site.infrastructure.redis
 import com.site.domain.auth.port.AccessTokenBlacklist
 import org.springframework.data.redis.core.StringRedisTemplate
 import org.springframework.stereotype.Component
+import java.time.Clock
 import java.time.Duration
 import java.time.Instant
 
@@ -15,10 +16,11 @@ import java.time.Instant
 @Component
 class RedisAccessTokenBlacklist(
     private val redisTemplate: StringRedisTemplate,
+    private val clock: Clock,
 ) : AccessTokenBlacklist {
 
     override fun add(tokenId: String, expiresAt: Instant) {
-        val ttl = Duration.between(Instant.now(), expiresAt)
+        val ttl = Duration.between(clock.instant(), expiresAt)
         if (ttl.isNegative || ttl.isZero) return
 
         redisTemplate.opsForValue().set(key(tokenId), LOGOUT_VALUE, ttl)
