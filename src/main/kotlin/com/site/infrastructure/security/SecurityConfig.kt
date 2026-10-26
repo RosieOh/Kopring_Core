@@ -5,6 +5,7 @@ import com.site.infrastructure.security.handler.JwtAccessDeniedHandler
 import com.site.infrastructure.security.handler.JwtAuthenticationEntryPoint
 import com.site.infrastructure.security.jwt.JwtAuthenticationFilter
 import com.site.infrastructure.security.jwt.JwtTokenProvider
+import jakarta.servlet.DispatcherType
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import org.springframework.http.HttpMethod
@@ -16,6 +17,7 @@ import org.springframework.security.crypto.factory.PasswordEncoderFactories
 import org.springframework.security.crypto.password.PasswordEncoder
 import org.springframework.security.web.SecurityFilterChain
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter
+import org.springframework.security.web.util.matcher.DispatcherTypeRequestMatcher
 
 @Configuration
 @EnableWebSecurity
@@ -41,6 +43,9 @@ class SecurityConfig(
                 sessionCreationPolicy = SessionCreationPolicy.STATELESS
             }
             authorizeHttpRequests {
+                // SSE 같은 비동기 응답이 끝날 때 한 번 더 일어나는 ASYNC 디스패치. 처음 요청(REQUEST)에서 이미 인가를 통과했다.
+                // 막으면 이미 보내기 시작한 응답에 인가 실패가 겹쳐 "response is already committed" 오류가 난다.
+                authorize(DispatcherTypeRequestMatcher(DispatcherType.ASYNC), permitAll)
                 authorize(HttpMethod.POST, "/api/members", permitAll)
                 authorize(HttpMethod.POST, "/api/auth/login", permitAll)
                 authorize(HttpMethod.POST, "/api/auth/reissue", permitAll)

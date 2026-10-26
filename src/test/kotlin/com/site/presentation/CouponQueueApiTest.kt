@@ -5,25 +5,32 @@ import com.site.domain.coupon.queue.CouponQueueWorker
 import com.site.domain.coupon.repository.CouponEventRepository
 import com.site.domain.coupon.repository.IssuedCouponRepository
 import com.site.domain.member.repository.MemberRepository
+import com.site.presentation.coupon.stream.CouponQueueStatusStreams
 import com.site.support.IntegrationTest
 import com.site.support.TestAuthHelper
 import com.site.support.couponEventFixture
 import com.site.support.flushDb
 import org.junit.jupiter.api.AfterEach
+import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.data.redis.core.StringRedisTemplate
 import org.springframework.http.HttpHeaders
+import org.springframework.http.MediaType
 import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.get
 import org.springframework.test.web.servlet.post
+import org.springframework.test.web.servlet.request.MockMvcRequestBuilders.asyncDispatch
+import org.springframework.test.web.servlet.result.MockMvcResultMatchers.status
 
 @IntegrationTest
 class CouponQueueApiTest @Autowired constructor(
     private val mockMvc: MockMvc,
     private val testAuthHelper: TestAuthHelper,
     private val couponQueueWorker: CouponQueueWorker,
+    private val queueStreams: CouponQueueStatusStreams,
     private val couponEventRepository: CouponEventRepository,
     private val issuedCouponRepository: IssuedCouponRepository,
     private val memberRepository: MemberRepository,
@@ -55,6 +62,7 @@ class CouponQueueApiTest @Autowired constructor(
             status { isAccepted() }
             jsonPath("$.data.state") { value("WAITING") }
             jsonPath("$.data.position") { value(1) }
+            jsonPath("$.data.retryAfterMillis") { value(300) }
         }
 
         couponQueueWorker.processAll()
@@ -86,6 +94,43 @@ class CouponQueueApiTest @Autowired constructor(
             status { isBadRequest() }
             jsonPath("$.code") { value("DIRECT_ONLY_COUPON_EVENT") }
         }
+    }
+
+    @Test
+    fun `SSE 로 연결하면 지금 상태를 보내고, 워커가 발급하면 결과를 보낸 뒤 연결을 닫는다`() {
+        val couponEventId = couponEventRepository.save(couponEventFixture(issueMode = CouponIssueMode.QUEUE)).id
+        mockMvc.post("/api/coupon-events/$couponEventId/queue") { header(HttpHeaders.AUTHORIZATION, "Bearer $token") }
+
+        val stream = mockMvc.get("/api/coupon-events/$couponEventId/queue/me/stream") {
+            header(HttpHeaders.AUTHORIZATION, "Bearer $token")
+            accept = MediaType.TEXT_EVENT_STREAM
+        }.andExpect { request { asyncStarted() } }.andReturn()
+        assertTrue(stream.response.contentAsString.contains("\"state\":\"WAITING\"")) { stream.response.contentAsString }
+
+        couponQueueWorker.processAll()
+        queueStreams.pushAll() // 스케줄러 대신 직접 부른다
+
+        mockMvc.perform(asyncDispatch(stream)).andExpect(status().isOk)
+        val events = stream.response.contentAsString
+        assertTrue(events.contains("event:status")) { events }
+        assertTrue(events.contains("\"state\":\"DONE\"") && events.contains("\"result\":\"ISSUED\"")) { events }
+        assertEquals(0, queueStreams.connectionCount())
+    }
+
+    @Test
+    fun `이미 결과가 나온 회원은 SSE 로 연결하자마자 결과를 받고 연결이 닫힌다`() {
+        val couponEventId = couponEventRepository.save(couponEventFixture(issueMode = CouponIssueMode.QUEUE)).id
+        mockMvc.post("/api/coupon-events/$couponEventId/queue") { header(HttpHeaders.AUTHORIZATION, "Bearer $token") }
+        couponQueueWorker.processAll()
+
+        val stream = mockMvc.get("/api/coupon-events/$couponEventId/queue/me/stream") {
+            header(HttpHeaders.AUTHORIZATION, "Bearer $token")
+            accept = MediaType.TEXT_EVENT_STREAM
+        }.andReturn()
+
+        mockMvc.perform(asyncDispatch(stream)).andExpect(status().isOk)
+        assertTrue(stream.response.contentAsString.contains("\"result\":\"ISSUED\"")) { stream.response.contentAsString }
+        assertEquals(0, queueStreams.connectionCount())
     }
 
     private fun getMyStatus(couponEventId: Long) =
