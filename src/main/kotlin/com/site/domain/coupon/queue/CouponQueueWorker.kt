@@ -70,12 +70,13 @@ class CouponQueueWorker(
     }
 
     private fun issueBatch(couponEventId: Long, memberIds: List<Long>) {
-        val results = try {
-            couponIssueService.issueQueuedBatch(couponEventId, memberIds).toQueueResults()
+        val batch = try {
+            couponIssueService.issueQueuedBatch(couponEventId, memberIds)
         } catch (e: Exception) {
             log.warn("일괄 발급에 실패해 한 명씩 다시 처리합니다. couponEventId={}, members={}", couponEventId, memberIds.size, e)
-            memberIds.associateWith { issueOne(couponEventId, it) }
+            null
         }
+        val results = batch?.toQueueResults() ?: memberIds.associateWith { issueOne(couponEventId, it) }
 
         results.entries.groupBy({ it.value }, { it.key }).forEach { (result, ids) ->
             couponQueueStore.complete(couponEventId, ids, result)
@@ -83,6 +84,8 @@ class CouponQueueWorker(
         }
         // 소진·종료를 만나면 대기열을 닫아 새로 줄 서는 것을 막는다. 남은 대기자는 다음 반복에서 한꺼번에 정리한다
         results.values.firstOrNull { it.closesQueue }?.let { couponQueueStore.close(couponEventId, it) }
+        // 조회 간격 힌트가 "남은 수량만큼 처리되면 결과가 나온다"를 계산할 수 있게 남겨 둔다
+        batch?.let { couponQueueStore.saveRemainingQuantity(couponEventId, it.remainingQuantity) }
     }
 
     /** 일괄 발급이 실패했을 때의 대안: 한 명씩 원자적 UPDATE 로 발급한다 */

@@ -69,7 +69,7 @@ class CouponController(
         @AuthenticationPrincipal authMember: AuthMember,
     ): ResponseEntity<SuccessResponse<CouponQueueStatusResponse>> {
         val status = couponQueueService.enqueue(couponEventId, authMember.memberId)
-        return SuccessCode.ENTER_COUPON_QUEUE_SUCCESS.toResponseEntity(status.toResponse(pollingPolicy.retryAfterMillis(status)))
+        return SuccessCode.ENTER_COUPON_QUEUE_SUCCESS.toResponseEntity(status.toResponse(pollingPolicy.retryAfterMillis(couponEventId, status)))
     }
 
     @GetMapping("/{couponEventId}/queue/me")
@@ -78,7 +78,7 @@ class CouponController(
         @AuthenticationPrincipal authMember: AuthMember,
     ): ResponseEntity<SuccessResponse<CouponQueueStatusResponse>> {
         val status = couponQueueService.getStatus(couponEventId, authMember.memberId)
-        return SuccessCode.GET_COUPON_QUEUE_STATUS_SUCCESS.toResponseEntity(status.toResponse(pollingPolicy.retryAfterMillis(status)))
+        return SuccessCode.GET_COUPON_QUEUE_STATUS_SUCCESS.toResponseEntity(status.toResponse(pollingPolicy.retryAfterMillis(couponEventId, status)))
     }
 
     /**

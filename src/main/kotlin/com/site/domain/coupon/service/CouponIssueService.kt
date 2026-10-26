@@ -119,6 +119,7 @@ class CouponIssueService(
                 CouponEventStatus.UPCOMING -> ErrorCode.COUPON_EVENT_NOT_STARTED
                 else -> ErrorCode.COUPON_SOLD_OUT
             },
+            remainingQuantity = couponEvent.remainingQuantity,
         )
     }
 
@@ -164,9 +165,11 @@ class CouponIssueService(
  * 일괄 발급 결과. 꺼낸 회원은 issued 나 rejected 중 한쪽에 들어간다.
  * @property issued 이번에 발급했거나 이미 받아 둔 회원 (꺼낸 순서 유지)
  * @property rejected 발급하지 못한 회원. 이유는 rejectReason (소진 / 종료)
+ * @property remainingQuantity 이번 배치를 발급한 뒤 남은 수량
  */
 data class QueuedBatchIssueResult(
     val issued: List<Long>,
     val rejected: List<Long>,
     val rejectReason: ErrorCode,
+    val remainingQuantity: Int,
 )
