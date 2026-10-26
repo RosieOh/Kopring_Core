@@ -234,7 +234,7 @@ class CouponQueueWorker(
 
 M3 의 워커는 회원마다 트랜잭션을 열었습니다. 커밋(디스크 기록)이 회원 수만큼 일어나서, 1,000장을 나눠 주는 데 12초가 걸렸습니다. M4 에서 50명을 한 트랜잭션으로 묶었습니다.
 
-[CouponIssueService.kt](../src/main/kotlin/com/site/domain/coupon/service/CouponIssueService.kt#L86-L124)
+[CouponIssueService.kt](../src/main/kotlin/com/site/domain/coupon/service/CouponIssueService.kt#L87-L125)
 
 ```kotlin
     /**

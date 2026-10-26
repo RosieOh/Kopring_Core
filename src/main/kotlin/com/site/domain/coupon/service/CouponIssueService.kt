@@ -41,7 +41,8 @@ class CouponIssueService(
 ) {
 
     /**
-     * 즉시 발급: 분산락 — Redis 락을 먼저 잡고, 그 안에서 트랜잭션을 열어 커밋한 뒤 락을 푼다.
+     * 분산락 — 즉시 발급 방식 중 하나(coupon.issue.direct-strategy=distributed-lock).
+     * Redis 락을 먼저 잡고, 그 안에서 트랜잭션을 열어 커밋한 뒤 락을 푼다.
      * 기다리는 건 Redis 에서 하므로 DB 커넥션을 붙잡지 않고, 서버가 여러 대여도 동작한다.
      * 대신 Redis 라는 의존성이 하나 늘고, 락 획득/해제만큼 왕복 시간이 추가된다.
      */

@@ -101,11 +101,12 @@ sequenceDiagram
 
 Redis 에 "coupon-event:7 락"을 잡은 요청만 DB 에 들어갑니다. 기다림이 Redis 에서 일어나 DB 커넥션을 쓰지 않습니다.
 
-[CouponIssueService.kt](../src/main/kotlin/com/site/domain/coupon/service/CouponIssueService.kt#L43-L53)
+[CouponIssueService.kt](../src/main/kotlin/com/site/domain/coupon/service/CouponIssueService.kt#L43-L54)
 
 ```kotlin
     /**
-     * 즉시 발급: 분산락 — Redis 락을 먼저 잡고, 그 안에서 트랜잭션을 열어 커밋한 뒤 락을 푼다.
+     * 분산락 — 즉시 발급 방식 중 하나(coupon.issue.direct-strategy=distributed-lock).
+     * Redis 락을 먼저 잡고, 그 안에서 트랜잭션을 열어 커밋한 뒤 락을 푼다.
      * 기다리는 건 Redis 에서 하므로 DB 커넥션을 붙잡지 않고, 서버가 여러 대여도 동작한다.
      * 대신 Redis 라는 의존성이 하나 늘고, 락 획득/해제만큼 왕복 시간이 추가된다.
      */
@@ -230,7 +231,7 @@ class NewTransactionRunner {
 
 DB 는 이 UPDATE 를 실행하는 동안 행을 잠급니다. 두 번째 요청은 첫 번째가 커밋할 때까지 기다렸다가, **커밋된 최신 값**으로 조건을 다시 봅니다. 반환값(바뀐 행 수)이 0 이면 소진입니다.
 
-[CouponIssueService.kt](../src/main/kotlin/com/site/domain/coupon/service/CouponIssueService.kt#L55-L84)
+[CouponIssueService.kt](../src/main/kotlin/com/site/domain/coupon/service/CouponIssueService.kt#L56-L85)
 
 ```kotlin
     /**
@@ -346,7 +347,7 @@ flowchart LR
 
 롤백 규칙: 기본적으로 `RuntimeException` 이 메서드 밖으로 나가면 롤백합니다. `ServiceException` 은 `RuntimeException` 이므로, 발급 중 `ALREADY_ISSUED_COUPON` 이 나면 앞서 올린 수량도 함께 되돌아갑니다.
 
-[CouponIssueService.kt](../src/main/kotlin/com/site/domain/coupon/service/CouponIssueService.kt#L142-L143)
+[CouponIssueService.kt](../src/main/kotlin/com/site/domain/coupon/service/CouponIssueService.kt#L143-L144)
 
 ```kotlin
     // 같은 회원의 동시 요청이 checkNotIssued 를 함께 통과해도 unique 제약이 막는다.
