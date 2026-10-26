@@ -22,6 +22,8 @@ ktlint_function_signature_body_expression_wrapping = multiline
 [src/test/**.kt]
 # 테스트 이름은 백틱으로 감싼 한글 문장을 쓴다
 ktlint_standard_function-naming = disabled
+# Kotest 스펙은 관례대로 `class X : FunSpec({ ... })` 한 줄로 시작한다 (본문 전체가 한 단계 더 들여써지지 않게)
+ktlint_standard_class-signature = disabled
 
 [*.{yml,yaml,json}]
 indent_size = 2
