@@ -46,20 +46,20 @@
 
 ## 3. 코드 리뷰 연습 — 이 코드의 약점 찾기
 
-좋은 코드에도 약점이 있습니다. 아래는 교재를 쓰면서 찾은 것들입니다. 먼저 해당 파일을 읽고 스스로 찾아본 뒤 답을 펼쳐 보세요.
+좋은 코드에도 약점이 있습니다. 아래는 교재를 쓰면서 찾은 것들이고, 1~3번은 그 뒤 M6 에서 고쳤습니다. 그래서 링크는 **고치기 전 코드**(M5 릴리스, `1dc5d62`)를 가리킵니다. 먼저 스스로 찾아본 뒤 답과 고친 PR 을 보세요.
 
-1. [CouponController.kt](../src/main/kotlin/com/site/presentation/coupon/api/CouponController.kt) 의 `issue()` 주석
-2. [JwtTokenProvider.parseAccessToken](../src/main/kotlin/com/site/infrastructure/security/jwt/JwtTokenProvider.kt) 이 서명은 맞지만 `role` 클레임이 없는 토큰을 받으면
-3. [RedisAccessTokenBlacklist.add](../src/main/kotlin/com/site/infrastructure/redis/RedisAccessTokenBlacklist.kt) 의 현재 시각
-4. [AuthService.reissue](../src/main/kotlin/com/site/domain/auth/service/AuthService.kt) 를 한 사용자가 두 탭에서 동시에 부르면
+1. [CouponController.kt](https://github.com/RosieOh/Kopring_Core/blob/1dc5d62/src/main/kotlin/com/site/presentation/coupon/api/CouponController.kt#L55) 의 `issue()` 주석
+2. [JwtTokenProvider.parseAccessToken](https://github.com/RosieOh/Kopring_Core/blob/1dc5d62/src/main/kotlin/com/site/infrastructure/security/jwt/JwtTokenProvider.kt#L57-L70) 이 서명은 맞지만 `role` 클레임이 없는 토큰을 받으면
+3. [RedisAccessTokenBlacklist.add](https://github.com/RosieOh/Kopring_Core/blob/1dc5d62/src/main/kotlin/com/site/infrastructure/redis/RedisAccessTokenBlacklist.kt#L20-L25) 의 현재 시각
+4. [AuthService.reissue](../src/main/kotlin/com/site/domain/auth/service/AuthService.kt) 를 한 사용자가 두 탭에서 동시에 부르면 (지금 코드)
 
 <details>
 <summary>답</summary>
 
-1. "즉시 발급 (분산락 + 사전 검사)" 는 M4 이전 설명입니다. 지금은 설정에 따라 원자적 UPDATE(기본) 또는 분산락입니다. 주석은 코드와 함께 늙습니다.
-2. `claims.get(ROLE_CLAIM, String::class.java)` 가 null 을 돌려주고 `MemberRole.valueOf(null)` 이 `NullPointerException` 을 던집니다. 이것은 `JwtException` 이 아니라서 `catch` 에 걸리지 않고, 필터는 `ServiceException` 만 잡으므로 401 대신 500 이 납니다. 이 서버가 발급한 토큰에는 항상 role 이 있어 지금은 일어나지 않지만, 키가 같은 다른 발급자가 생기면 드러납니다.
-3. `Instant.now()` 를 직접 씁니다. 다른 곳은 `Clock` 빈을 쓰는데 여기만 달라서, 테스트에서 시간을 통제할 수 없습니다.
-4. 둘 다 같은 refresh token 을 보내면 하나는 `CONSUMED`, 다른 하나는 `REUSED` 가 되어 패밀리 전체가 폐기됩니다. 정상 사용자인데 로그아웃됩니다. Refresh Token Rotation 의 알려진 대가이고, 보통 "직전 토큰은 몇 초 동안 한 번 더 허용"하는 유예 시간으로 완화합니다.
+1. "즉시 발급 (분산락 + 사전 검사)" 는 M4 이전 설명이었습니다. 기본 방식은 원자적 UPDATE 이고 M5 에서는 동시 실행 제한도 더해졌습니다. 주석은 코드와 함께 늙습니다. → #65 에서 고침
+2. `claims.get(ROLE_CLAIM, String::class.java)` 가 null 을 돌려주고, null 이 될 수 없는 `MemberRole.valueOf` 의 인자로 넘기는 순간 Kotlin 의 null 검사가 `NullPointerException` 을 던집니다. 이것은 `JwtException` 이 아니라서 `catch` 에 걸리지 않고, 필터는 `ServiceException` 만 잡으므로 401 대신 500 이 납니다. `sub` 가 숫자가 아니거나 `jti`·`exp` 가 없어도 마찬가지였습니다. → #64 에서 클레임을 꺼내다 하나라도 이상하면 `INVALID_TOKEN`(401)으로 고침
+3. `Instant.now()` 를 직접 씁니다. 다른 곳은 `Clock` 빈을 쓰는데 여기만 달라서, 테스트에서 시간을 통제할 수 없습니다. `JwtTokenProvider` 의 발급 시각(`Date()`)과 jjwt 의 만료 검증도 같은 문제였습니다. → #66 에서 고침
+4. 둘 다 같은 refresh token 을 보내면 하나는 `CONSUMED`, 다른 하나는 `REUSED` 가 되어 패밀리 전체가 폐기됩니다. 정상 사용자인데 로그아웃됩니다. Refresh Token Rotation 의 알려진 대가이고, 보통 "직전 토큰은 몇 초 동안 한 번 더 허용"하는 유예 시간으로 완화합니다. (아직 고치지 않았습니다. 해 볼 만한 과제입니다)
 
 </details>
 
