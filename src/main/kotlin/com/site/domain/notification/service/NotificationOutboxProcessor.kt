@@ -30,6 +30,7 @@ class NotificationOutboxProcessor(
     private val objectMapper: ObjectMapper,
     private val properties: NotificationOutboxProperties,
     private val transactionTemplate: TransactionTemplate,
+    private val metrics: NotificationOutboxMetrics,
     private val clock: Clock,
 ) {
 
@@ -68,10 +69,11 @@ class NotificationOutboxProcessor(
 
     private fun NotificationOutbox.apply(result: NotificationResult, now: LocalDateTime) {
         when (result) {
-            NotificationResult.Sent -> markSent(now)
-            is NotificationResult.Skipped -> markSkipped(now, result.reason)
+            NotificationResult.Sent -> markSent(now).also { metrics.record(type, "sent") }
+            is NotificationResult.Skipped -> markSkipped(now, result.reason).also { metrics.record(type, "skipped") }
             is NotificationResult.Failed -> {
                 recordFailure(now, result.reason, result.retryable, properties.maxAttempts, properties.backoff)
+                metrics.record(type, if (status == OutboxStatus.FAILED) "failed" else "retry")
                 if (status == OutboxStatus.FAILED) {
                     // 운영이라면 여기서 알람을 보낸다. FAILED 로 남은 건이 재발송·집계의 근거가 된다.
                     log.error("알림 최종 실패. outboxId={}, attempts={}, reason={}", id, attemptCount, result.reason)

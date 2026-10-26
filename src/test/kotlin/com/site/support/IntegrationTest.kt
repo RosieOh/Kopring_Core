@@ -1,5 +1,6 @@
 package com.site.support
 
+import org.springframework.boot.test.autoconfigure.actuate.observability.AutoConfigureObservability
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.context.annotation.Import
@@ -13,6 +14,8 @@ import org.springframework.test.context.ActiveProfiles
 @Retention(AnnotationRetention.RUNTIME)
 @SpringBootTest
 @AutoConfigureMockMvc
+// 테스트는 기본적으로 지표 내보내기를 끈다. 운영과 같은 Prometheus 레지스트리를 쓰도록 켠다
+@AutoConfigureObservability(tracing = false)
 @ActiveProfiles("test")
 @Import(TestContainersConfig::class, TestAuthHelper::class, FakeAlimtalkSender::class, LearningCouponIssueStrategies::class)
 annotation class IntegrationTest

@@ -122,6 +122,10 @@ class RedisCouponQueueStore(
     override fun closedReason(couponEventId: Long): CouponQueueResult? =
         redisTemplate.opsForValue().get(closedKey(couponEventId))?.let { CouponQueueResult.valueOf(it) }
 
+    override fun waitingCount(couponEventId: Long): Long = count(waitingKey(couponEventId))
+
+    override fun processingCount(couponEventId: Long): Long = count(processingKey(couponEventId))
+
     private fun count(key: String): Long = redisTemplate.opsForZSet().zCard(key) ?: 0
 
     private fun List<*>?.toMemberIds(): List<Long> = orEmpty().map { it.toString().toLong() }

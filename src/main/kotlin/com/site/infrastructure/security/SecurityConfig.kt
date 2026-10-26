@@ -47,6 +47,8 @@ class SecurityConfig(
                 authorize("/swagger-ui/**", permitAll)
                 authorize("/v3/api-docs/**", permitAll)
                 authorize("/actuator/health", permitAll)
+                // Prometheus 수집용. 운영 프로필은 health 만 노출해서 이 경로 자체가 없다 (운영에서 노출하려면 관리 포트를 분리한다)
+                authorize("/actuator/prometheus", permitAll)
                 authorize("/error", permitAll)
                 authorize("/api/admin/**", hasRole("ADMIN"))
                 authorize(anyRequest, authenticated)
