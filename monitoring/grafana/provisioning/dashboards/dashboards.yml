@@ -1,0 +1,9 @@
+apiVersion: 1
+
+providers:
+  - name: kopring
+    folder: Kopring Core
+    type: file
+    disableDeletion: true
+    options:
+      path: /var/lib/grafana/dashboards

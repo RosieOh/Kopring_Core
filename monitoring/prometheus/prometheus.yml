@@ -1,0 +1,10 @@
+# 로컬에서 ./gradlew bootRun 으로 띄운 앱(호스트 8080)의 지표를 5초마다 가져온다
+global:
+  scrape_interval: 5s
+  evaluation_interval: 5s
+
+scrape_configs:
+  - job_name: kopring-core
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["host.docker.internal:8080"]

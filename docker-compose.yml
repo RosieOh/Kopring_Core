@@ -22,5 +22,35 @@ services:
     ports:
       - "6380:6379"
 
+  # 모니터링: docker compose --profile monitoring up -d  (Grafana http://localhost:3000, Prometheus http://localhost:9090)
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    container_name: kopring-prometheus
+    profiles: ["monitoring"]
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    # 호스트에서 bootRun 으로 띄운 앱에 접근한다 (Linux 에서는 이 설정이 있어야 host.docker.internal 이 풀린다)
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  grafana:
+    image: grafana/grafana:11.4.0
+    container_name: kopring-grafana
+    profiles: ["monitoring"]
+    ports:
+      - "3000:3000"
+    environment:
+      # 로컬 전용: 로그인 없이 대시보드를 본다
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      GF_DASHBOARDS_DEFAULT_HOME_DASHBOARD_PATH: /var/lib/grafana/dashboards/kopring-core.json
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    depends_on:
+      - prometheus
+
 volumes:
   kopring-mysql-data:
