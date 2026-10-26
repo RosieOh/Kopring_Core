@@ -9,8 +9,14 @@ import com.site.independent.type.ErrorCode
 import com.site.support.IntegrationTest
 import com.site.support.LearningCouponIssueStrategies
 import com.site.support.couponEventFixture
+import com.zaxxer.hikari.HikariDataSource
+import io.micrometer.core.instrument.MeterRegistry
+import org.awaitility.kotlin.atMost
+import org.awaitility.kotlin.await
+import org.awaitility.kotlin.untilAsserted
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertTimeoutPreemptively
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
@@ -20,12 +26,15 @@ import org.redisson.api.RedissonClient
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.data.repository.findByIdOrNull
+import org.springframework.transaction.support.TransactionTemplate
+import java.time.Duration
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
+import javax.sql.DataSource
 
 /**
  * 100장짜리 이벤트에 300명이 동시에 발급을 요청한다. 동시성 제어 방식 네 가지를 같은 조건으로 비교한다.
@@ -37,10 +46,14 @@ class CouponIssueConcurrencyTest @Autowired constructor(
     private val couponIssueService: CouponIssueService,
     private val learningStrategies: LearningCouponIssueStrategies,
     private val startedCouponEvents: StartedCouponEventCache,
+    private val bulkhead: CouponIssueBulkhead,
     private val metrics: CouponIssueMetrics,
     private val couponEventRepository: CouponEventRepository,
     private val issuedCouponRepository: IssuedCouponRepository,
     private val redissonClient: RedissonClient,
+    private val dataSource: DataSource,
+    private val transactionTemplate: TransactionTemplate,
+    private val meterRegistry: MeterRegistry,
 ) {
 
     private val log = LoggerFactory.getLogger(javaClass)
@@ -108,6 +121,45 @@ class CouponIssueConcurrencyTest @Autowired constructor(
     }
 
     @Test
+    fun `발급이 몰려도 발급 단계는 커넥션을 최대 maxConcurrent 개만 쓰고, 같은 풀을 쓰는 다른 조회는 그동안 커넥션을 얻는다`() {
+        val pool = dataSource.unwrap(HikariDataSource::class.java).hikariPoolMXBean
+        val couponEventId = couponEventRepository.save(couponEventFixture()).id
+        val limit = CouponIssueProperties.Bulkhead(maxConcurrent = 2, maxWait = Duration.ofSeconds(30))
+        val facade = CouponIssueFacade(
+            startedCouponEvents,
+            couponIssueService,
+            CouponIssueBulkhead(CouponIssueProperties(bulkhead = limit), meterRegistry),
+            CouponIssueProperties(directStrategy = DirectIssueStrategy.ATOMIC_UPDATE),
+            metrics,
+        )
+
+        // 다른 트랜잭션이 이벤트 행을 잠근 상황: 발급의 UPDATE 는 커넥션을 쥔 채 행 잠금을 기다린다
+        val locked = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val locker = CompletableFuture.runAsync {
+            transactionTemplate.executeWithoutResult {
+                couponEventRepository.findByIdForUpdate(couponEventId)
+                locked.countDown()
+                release.await()
+            }
+        }
+        locked.await(5, TimeUnit.SECONDS)
+        val executor = Executors.newFixedThreadPool(10)
+        val requests = (1L..10L).map { memberId -> CompletableFuture.supplyAsync({ facade.issue(couponEventId, memberId) }, executor) }
+
+        // 행을 잠근 1개 + 행 잠금을 기다리는 발급 2개. 나머지 8개 요청은 커넥션 없이 자리를 기다린다
+        await atMost Duration.ofSeconds(5) untilAsserted { assertEquals(3, pool.activeConnections) }
+        await.during(Duration.ofMillis(500)).atMost(Duration.ofSeconds(2)).untilAsserted { assertEquals(3, pool.activeConnections) }
+        assertTimeoutPreemptively(Duration.ofSeconds(2)) { couponEventRepository.count() }
+
+        release.countDown()
+        locker.get(5, TimeUnit.SECONDS)
+        requests.forEach { it.get(10, TimeUnit.SECONDS) }
+        executor.shutdown()
+        assertEquals(10L, issuedCouponRepository.countByCouponEventId(couponEventId))
+    }
+
+    @Test
     fun `같은 회원이 동시에 여러 번 요청하면 unique 제약으로 1장만 발급되고, 실패한 요청의 수량 증가는 롤백된다`() {
         val result = issueConcurrently(
             label = "같은 회원 중복 요청",
@@ -126,7 +178,7 @@ class CouponIssueConcurrencyTest @Autowired constructor(
         couponIssueService.issueWithAtomicUpdate(couponEventId, memberId, CouponIssueMode.DIRECT)
 
     private fun facade(strategy: DirectIssueStrategy) =
-        CouponIssueFacade(startedCouponEvents, couponIssueService, CouponIssueProperties(directStrategy = strategy), metrics)
+        CouponIssueFacade(startedCouponEvents, couponIssueService, bulkhead, CouponIssueProperties(directStrategy = strategy), metrics)
 
     private fun assertExactlyTotalIssued(result: IssueResult) {
         assertEquals(TOTAL_QUANTITY, result.successCount)
