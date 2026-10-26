@@ -122,6 +122,12 @@ class RedisCouponQueueStore(
     override fun closedReason(couponEventId: Long): CouponQueueResult? =
         redisTemplate.opsForValue().get(closedKey(couponEventId))?.let { CouponQueueResult.valueOf(it) }
 
+    override fun saveRemainingQuantity(couponEventId: Long, remaining: Int) {
+        redisTemplate.opsForValue().set(remainingKey(couponEventId), remaining.toString(), properties.keyTtl)
+    }
+
+    override fun remainingQuantity(couponEventId: Long): Int? = redisTemplate.opsForValue().get(remainingKey(couponEventId))?.toInt()
+
     override fun waitingCount(couponEventId: Long): Long = count(waitingKey(couponEventId))
 
     override fun processingCount(couponEventId: Long): Long = count(processingKey(couponEventId))
@@ -139,6 +145,8 @@ class RedisCouponQueueStore(
     private fun resultKey(id: Long) = "coupon-queue:{$id}:result"
 
     private fun closedKey(id: Long) = "coupon-queue:{$id}:closed"
+
+    private fun remainingKey(id: Long) = "coupon-queue:{$id}:remaining"
 
     companion object {
         private const val ACTIVE_KEY = "coupon-queue:active"

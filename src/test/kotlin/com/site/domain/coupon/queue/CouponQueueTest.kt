@@ -102,6 +102,17 @@ class CouponQueueTest @Autowired constructor(
     }
 
     @Test
+    fun `워커는 발급할 때마다 남은 수량을 기록한다 (조회 간격 힌트용)`() {
+        val couponEventId = ongoingCouponEvent(totalQuantity = 10)
+        assertEquals(null, couponQueueStore.remainingQuantity(couponEventId)) // 아직 한 번도 발급하지 않았다
+
+        (1L..3L).forEach { couponQueueService.enqueue(couponEventId, it) }
+        couponQueueWorker.processAll()
+
+        assertEquals(7, couponQueueStore.remainingQuantity(couponEventId))
+    }
+
+    @Test
     fun `일괄 발급은 이미 받은 회원은 그대로 두고, 남은 수량만큼 앞사람부터 발급한 뒤 나머지는 소진으로 돌려준다`() {
         val couponEventId = ongoingCouponEvent(totalQuantity = 3)
         couponIssueService.issueWithAtomicUpdate(couponEventId, 1L, CouponIssueMode.QUEUE) // 1번은 이전 처리에서 이미 받았다

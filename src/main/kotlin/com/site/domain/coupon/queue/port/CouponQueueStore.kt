@@ -63,6 +63,12 @@ interface CouponQueueStore {
 
     fun close(couponEventId: Long, reason: CouponQueueResult)
 
+    /** 워커가 일괄 발급 후 확인한 남은 수량을 기록한다. 조회 간격 힌트가 결과가 나올 시점을 추정할 때 쓴다 */
+    fun saveRemainingQuantity(couponEventId: Long, remaining: Int)
+
+    /** 마지막으로 기록된 남은 수량. 워커가 아직 한 번도 발급하지 않았으면 null */
+    fun remainingQuantity(couponEventId: Long): Int?
+
     fun closedReason(couponEventId: Long): CouponQueueResult?
 }
 
