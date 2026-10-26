@@ -16,6 +16,7 @@ import io.jsonwebtoken.io.Decoders
 import io.jsonwebtoken.security.Keys
 import org.springframework.stereotype.Component
 import java.security.SecureRandom
+import java.time.Clock
 import java.util.Base64
 import java.util.Date
 import java.util.UUID
@@ -25,14 +26,17 @@ import io.jsonwebtoken.security.SecurityException as JwtSecurityException
 @Component
 class JwtTokenProvider(
     private val jwtProperties: JwtProperties,
+    private val clock: Clock,
 ) : TokenIssuer {
 
     private val secretKey: SecretKey = Keys.hmacShaKeyFor(Decoders.BASE64.decode(jwtProperties.secret))
-    private val parser: JwtParser = Jwts.parser().verifyWith(secretKey).build()
+
+    // 만료 검증도 서비스 Clock 으로 한다. jjwt 기본값은 시스템 시각이라, 테스트에서 시간을 움직여도 만료 판단은 따라오지 않는다
+    private val parser: JwtParser = Jwts.parser().verifyWith(secretKey).clock { Date.from(clock.instant()) }.build()
     private val secureRandom = SecureRandom()
 
     override fun createAccessToken(memberId: Long, role: MemberRole): String {
-        val now = Date()
+        val now = Date.from(clock.instant())
         val expiration = Date(now.time + jwtProperties.accessTokenExpiration.toMillis())
 
         return Jwts.builder()
