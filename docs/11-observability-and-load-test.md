@@ -178,7 +178,7 @@ Grafana 대시보드("Kopring Core — 선착순 쿠폰")는 [monitoring/grafana
 
 부하 테스트 결과를 표로 만드는 스크립트가 쓰는 PromQL 입니다.
 
-[summarize.py](../load-test/summarize.py#L18-L29)
+[summarize.py](../load-test/summarize.py#L18-L33)
 
 ```python
 def server_metrics(start: int, end: int) -> dict:
@@ -187,9 +187,13 @@ def server_metrics(start: int, end: int) -> dict:
     at = end + 3
     return {
         "db_pending_max": prom(f"max_over_time(sum(hikaricp_connections_pending{{{APP}}})[{window}s:1s])", at),
-        "tomcat_busy_max": prom(f"max_over_time(sum(tomcat_threads_busy_threads{{{APP}}})[{window}s:1s])", at),
+        # 가상 스레드에는 Tomcat 스레드 풀 지표가 없어서, 스레드 방식과 상관없는 "처리 중인 요청 수"로 본다
+        "inflight_max": prom(f"max_over_time(sum(http_server_requests_active_seconds_gcount{{{APP}}})[{window}s:1s])", at),
         "lock_wait_p95": prom(
             f"histogram_quantile(0.95, sum by (le) (increase(lock_wait_seconds_bucket{{{APP}}}[{window}s])))", at
+        ),
+        "bulkhead_wait_p95": prom(
+            f"histogram_quantile(0.95, sum by (le) (increase(coupon_issue_bulkhead_wait_seconds_bucket{{{APP}}}[{window}s])))", at
         ),
         "queue_waiting_max": prom(f'max_over_time(sum(coupon_queue_size{{{APP}, state="waiting"}})[{window}s:1s])', at),
     }
@@ -203,17 +207,33 @@ def server_metrics(start: int, end: int) -> dict:
 
 ## 4. k6 — 오픈 순간 재현하기
 
-[issue-direct.js](../load-test/issue-direct.js)
+[issue-direct.js](../load-test/issue-direct.js#L23-L41)
 
 ```javascript
 export const options = {
   scenarios: {
     // 오픈 순간 몰림: 모든 VU 가 동시에 출발해 1번씩 요청한다
-    rush: { executor: 'per-vu-iterations', vus: VUS, iterations: 1, maxDuration: '2m' },
+    rush: { executor: 'per-vu-iterations', vus: VUS, iterations: 1, maxDuration: '2m', exec: 'rush' },
+    // 다른 사용자가 같은 시간에 이벤트 목록을 본다 (DB 를 읽는 다른 API)
+    ...(BROWSE_RATE > 0
+      ? {
+          browse: {
+            executor: 'constant-arrival-rate',
+            rate: BROWSE_RATE,
+            timeUnit: '1s',
+            duration: `${BROWSE_SECONDS}s`,
+            preAllocatedVUs: BROWSE_RATE,
+            maxVUs: BROWSE_RATE * 20,
+            exec: 'browse',
+          },
+        }
+      : {}),
   },
 ```
 
 선착순 쿠폰의 부하는 "초당 N건이 꾸준히"가 아니라 "**정각에 한꺼번에**"입니다. 가상 사용자(VU) 전원이 동시에 출발해 한 번씩 요청하게 했습니다.
+
+`browse` 시나리오(M5)는 `BROWSE_RATE` 를 주면 켜집니다. 발급이 몰리는 동안 다른 사용자가 이벤트 목록을 초당 N번 보게 해서, **몰림이 다른 기능을 얼마나 느리게 하는지** 잽니다. 두 시나리오가 함께 돌고, 결과는 `name` 태그(`issue`, `browse`)로 나눠 봅니다.
 
 토큰은 k6 가 직접 서명합니다.
 

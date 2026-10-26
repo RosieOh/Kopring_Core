@@ -463,7 +463,7 @@ DTO → 명령 변환을 presentation 패키지에 두면, domain 의 `CouponEve
 
 `private` 확장 함수는 그 파일(클래스) 안에서만 쓰는 도우미가 됩니다.
 
-[JwtTokenProvider.kt](../src/main/kotlin/com/site/infrastructure/security/jwt/JwtTokenProvider.kt#L72-L79)
+[JwtTokenProvider.kt](../src/main/kotlin/com/site/infrastructure/security/jwt/JwtTokenProvider.kt#L84-L91)
 
 ```kotlin
     // when + is 로 예외 타입별 분기 (스마트 캐스트)
@@ -540,7 +540,7 @@ fun <T, R> Page<T>.toPageResponse(transform: (T) -> R): PageResponse<R> =
 
 `corePoolSize = 4` 는 Java 의 `setCorePoolSize(4)` 입니다. Kotlin 은 Java 의 getter/setter 를 프로퍼티처럼 부를 수 있습니다.
 
-[JwtTokenProvider.kt](../src/main/kotlin/com/site/infrastructure/security/jwt/JwtTokenProvider.kt#L52-L55)
+[JwtTokenProvider.kt](../src/main/kotlin/com/site/infrastructure/security/jwt/JwtTokenProvider.kt#L57-L60)
 
 ```kotlin
     override fun createRefreshToken(): String {
@@ -553,7 +553,7 @@ fun <T, R> Page<T>.toPageResponse(transform: (T) -> R): PageResponse<R> =
 
 반복문 대신 컬렉션 함수를 이어 씁니다. 대기열 일괄 발급 코드가 좋은 예입니다.
 
-[CouponIssueService.kt](../src/main/kotlin/com/site/domain/coupon/service/CouponIssueService.kt#L101-L116)
+[CouponIssueService.kt](../src/main/kotlin/com/site/domain/coupon/service/CouponIssueService.kt#L102-L117)
 
 ```kotlin
         val alreadyIssued = issuedCouponRepository.findIssuedMemberIds(couponEventId, memberIds).toSet()
@@ -607,7 +607,7 @@ Kotlin 은 **읽기 전용 컬렉션(`List`, `Map`)과 바꿀 수 있는 컬렉�
 
 `try` 도 값을 돌려주는 식입니다.
 
-[CouponIssueService.kt](../src/main/kotlin/com/site/domain/coupon/service/CouponIssueService.kt#L144-L152)
+[CouponIssueService.kt](../src/main/kotlin/com/site/domain/coupon/service/CouponIssueService.kt#L145-L153)
 
 ```kotlin
     private fun saveIssuedCoupon(couponEvent: CouponEvent, memberId: Long): IssuedCoupon {

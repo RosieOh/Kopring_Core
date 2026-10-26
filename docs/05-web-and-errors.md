@@ -16,7 +16,7 @@ flowchart LR
 
 ## 2. 컨트롤러 해부
 
-[CouponController.kt](../src/main/kotlin/com/site/presentation/coupon/api/CouponController.kt#L34-L73)
+[CouponController.kt](../src/main/kotlin/com/site/presentation/coupon/api/CouponController.kt#L34-L76)
 
 ```kotlin
 @RestController
@@ -40,7 +40,10 @@ class CouponController(
         return SuccessCode.GET_COUPON_EVENTS_SUCCESS.toResponseEntity(events.toPageResponse { it.toSummaryResponse(now) })
     }
 
-    /** 즉시 발급 (분산락 + 사전 검사) */
+    /**
+     * 즉시 발급. 사전 검사(메모리 캐시) → 동시 실행 제한 → 설정한 방식(coupon.issue.direct-strategy, 기본 원자적 UPDATE)으로 발급한다.
+     * 흐름은 CouponIssueFacade 참고.
+     */
     @PostMapping("/{couponEventId}/issue")
     fun issue(
         @PathVariable couponEventId: Long,
@@ -72,7 +75,7 @@ class CouponController(
 
 컨트롤러는 **판단을 하지 않습니다.** 받은 값을 서비스에 넘기고, 결과를 DTO 로 바꿉니다. 회원 ID 를 요청 본문이 아니라 토큰(`authMember.memberId`)에서 꺼내는 것도 중요합니다. 본문에서 받으면 남의 ID 로 쿠폰을 받을 수 있습니다.
 
-> `issue()` 위의 주석 "(분산락 + 사전 검사)"는 M4 이전의 설명입니다. 지금은 설정(`coupon.issue.direct-strategy`)에 따라 원자적 UPDATE(기본) 또는 분산락을 씁니다. ([7장](07-concurrency.md))
+> `issue()` 위의 주석은 원래 "즉시 발급 (분산락 + 사전 검사)" 였습니다. M4 에서 기본 방식을 원자적 UPDATE 로 바꾼 뒤에도 그대로 남아 있다가, 이 교재를 쓰면서 발견해 고쳤습니다(#65). 주석은 코드와 함께 늙습니다. 자세한 흐름은 한 곳(`CouponIssueFacade`)에만 적고 다른 곳은 그곳을 가리키게 하면, 흐름이 바뀔 때 고칠 곳이 하나로 줄어듭니다. ([7장](07-concurrency.md))
 
 ## 3. 응답 형식 — 성공은 `SuccessResponse`
 

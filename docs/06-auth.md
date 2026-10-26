@@ -167,11 +167,11 @@ data class AuthMember(
 
 ## 4. 토큰 만들기와 읽기 — `JwtTokenProvider`
 
-[JwtTokenProvider.kt](../src/main/kotlin/com/site/infrastructure/security/jwt/JwtTokenProvider.kt#L33-L70)
+[JwtTokenProvider.kt](../src/main/kotlin/com/site/infrastructure/security/jwt/JwtTokenProvider.kt#L38-L82)
 
 ```kotlin
     override fun createAccessToken(memberId: Long, role: MemberRole): String {
-        val now = Date()
+        val now = Date.from(clock.instant())
         val expiration = Date(now.time + jwtProperties.accessTokenExpiration.toMillis())
 
         return Jwts.builder()
@@ -201,18 +201,27 @@ data class AuthMember(
             throw ServiceException(e.toErrorCode())
         }
 
-        return AuthMember(
-            memberId = claims.subject.toLong(),
-            role = MemberRole.valueOf(claims.get(ROLE_CLAIM, String::class.java)),
-            tokenId = claims.id,
-            tokenExpiresAt = claims.expiration.toInstant(),
-        )
+        // 서명이 맞아도 이 서비스가 넣는 클레임이 빠졌거나 형식이 다르면 401 로 거절한다. (클레임 구성이 바뀌기 전의 토큰 등)
+        // 그대로 꺼내면 NPE·NumberFormatException 이 위의 catch 밖으로 새어, ServiceException 만 잡는 필터를 지나 500 이 된다.
+        return claims.toAuthMemberOrNull() ?: throw ServiceException(ErrorCode.INVALID_TOKEN)
+    }
+
+    private fun Claims.toAuthMemberOrNull(): AuthMember? {
+        val memberId = subject?.toLongOrNull() ?: return null
+        // get(name, String::class.java) 는 타입이 다르면 RequiredTypeException 을 던지므로 as? 로 꺼낸다
+        val roleName = this[ROLE_CLAIM] as? String ?: return null
+        val role = MemberRole.entries.firstOrNull { it.name == roleName } ?: return null
+        val tokenId = id ?: return null
+        val expiresAt = expiration ?: return null
+        return AuthMember(memberId = memberId, role = role, tokenId = tokenId, tokenExpiresAt = expiresAt.toInstant())
     }
 ```
 
 - `.id(UUID...)` 가 토큰마다 고유한 ID(jti)입니다. 로그아웃할 때 이 ID 를 블랙리스트에 올립니다. 토큰 원문 전체를 저장하지 않아도 됩니다.
 - 회원 ID 와 권한을 토큰 안에 넣어서, 요청마다 DB 에서 회원을 읽지 않습니다.
 - JWT 는 **암호화가 아니라 서명**입니다. 내용은 누구나 읽을 수 있고, 위조만 못 합니다. 비밀 정보를 넣지 않습니다.
+- **서명이 맞아도 클레임은 믿지 않고 꺼냅니다** (`toAuthMemberOrNull`). 처음에는 `MemberRole.valueOf(claims.get(...))` 처럼 바로 꺼냈는데, `role` 이 없는 토큰이면 NPE 가 `catch (e: JwtException)` 밖에서 터져 401 이 아니라 500 이 났습니다(#64). 인증 경로는 이상한 입력을 모두 같은 응답(401)으로 닫아야 합니다.
+- 발급 시각과 만료 검증은 서비스 `Clock` 을 씁니다(#66). jjwt 파서도 기본은 시스템 시각이라 `.clock { ... }` 으로 같은 시계를 넣었습니다. 그래야 테스트에서 시간을 움직여 "만료 1초 전 통과, 1초 뒤 거절"을 확인할 수 있습니다.
 
 ## 5. 권한 — Role 로 갈까, 관리자 엔티티를 따로 둘까
 
@@ -373,7 +382,7 @@ Redis 명령 두 개(GET 후 DEL)를 따로 보내면 그 사이에 다른 요�
 
 ## 8. 로그아웃 — 블랙리스트는 원래 만료 시각까지만
 
-[RedisAccessTokenBlacklist.kt](../src/main/kotlin/com/site/infrastructure/redis/RedisAccessTokenBlacklist.kt#L9-L27)
+[RedisAccessTokenBlacklist.kt](../src/main/kotlin/com/site/infrastructure/redis/RedisAccessTokenBlacklist.kt#L10-L37)
 
 ```kotlin
 /**
@@ -385,19 +394,28 @@ Redis 명령 두 개(GET 후 DEL)를 따로 보내면 그 사이에 다른 요�
 @Component
 class RedisAccessTokenBlacklist(
     private val redisTemplate: StringRedisTemplate,
+    private val clock: Clock,
 ) : AccessTokenBlacklist {
 
     override fun add(tokenId: String, expiresAt: Instant) {
-        val ttl = Duration.between(Instant.now(), expiresAt)
+        val ttl = Duration.between(clock.instant(), expiresAt)
         if (ttl.isNegative || ttl.isZero) return
 
         redisTemplate.opsForValue().set(key(tokenId), LOGOUT_VALUE, ttl)
     }
 
     override fun contains(tokenId: String): Boolean = redisTemplate.hasKey(key(tokenId)) == true
+
+    private fun key(tokenId: String) = "$KEY_PREFIX$tokenId"
+
+    companion object {
+        private const val KEY_PREFIX = "access-token:blacklist:"
+        private const val LOGOUT_VALUE = "logout"
+    }
+}
 ```
 
-블랙리스트가 무한히 커지지 않는 이유가 TTL 입니다. 30분짜리 토큰이면 최대 30분만 기억합니다.
+블랙리스트가 무한히 커지지 않는 이유가 TTL 입니다. 30분짜리 토큰이면 최대 30분만 기억합니다. TTL 도 서비스 `Clock` 으로 계산합니다(처음에는 `Instant.now()` 를 직접 불렀습니다, #66).
 
 로그아웃은 refresh token 패밀리도 폐기합니다. 단, **본인 것일 때만** 폐기합니다.
 
