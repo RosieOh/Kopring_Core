@@ -104,7 +104,7 @@ class CouponQueueTest @Autowired constructor(
     @Test
     fun `일괄 발급은 이미 받은 회원은 그대로 두고, 남은 수량만큼 앞사람부터 발급한 뒤 나머지는 소진으로 돌려준다`() {
         val couponEventId = ongoingCouponEvent(totalQuantity = 3)
-        couponIssueService.issueWithAtomicUpdate(couponEventId, 1L) // 1번은 이전 처리에서 이미 받았다
+        couponIssueService.issueWithAtomicUpdate(couponEventId, 1L, CouponIssueMode.QUEUE) // 1번은 이전 처리에서 이미 받았다
 
         val result = couponIssueService.issueQueuedBatch(couponEventId, listOf(1L, 2L, 3L, 4L, 5L))
 
@@ -160,7 +160,7 @@ class CouponQueueTest @Autowired constructor(
         couponQueueStore.claimNext(couponEventId, count = 3, leaseUntilMillis = clock.millis() - 1)
         assertEquals(CouponQueueStatus.Processing, couponQueueService.getStatus(couponEventId, 1L))
         // 그중 1번은 DB 발급까지 끝내고 결과를 기록하기 직전에 죽었다
-        couponIssueService.issueWithAtomicUpdate(couponEventId, 1L)
+        couponIssueService.issueWithAtomicUpdate(couponEventId, 1L, CouponIssueMode.QUEUE)
 
         couponQueueWorker.processAll()
 

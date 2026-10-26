@@ -79,13 +79,7 @@ class CouponEvent(
         require(couponValidityDays in VALIDITY_DAYS_RANGE) { "couponValidityDays must be in $VALIDITY_DAYS_RANGE: $couponValidityDays" }
     }
 
-    fun status(now: LocalDateTime): CouponEventStatus =
-        when {
-            period.isUpcoming(now) -> CouponEventStatus.UPCOMING
-            period.isEnded(now) -> CouponEventStatus.ENDED
-            issuedQuantity >= totalQuantity -> CouponEventStatus.SOLD_OUT
-            else -> CouponEventStatus.ONGOING
-        }
+    fun status(now: LocalDateTime): CouponEventStatus = CouponEventStatus.of(period, soldOut = issuedQuantity >= totalQuantity, now)
 
     fun update(
         name: String,
@@ -112,29 +106,10 @@ class CouponEvent(
     fun couponExpiresAt(issuedAt: LocalDateTime): LocalDateTime = issuedAt.plusDays(couponValidityDays.toLong())
 
     /** 요청한 발급 방식이 이 이벤트의 방식과 다르면 거절한다. (대기열 새치기 방지) */
-    fun checkIssueMode(requested: CouponIssueMode) {
-        if (issueMode == requested) return
+    fun checkIssueMode(requested: CouponIssueMode) = issueMode.checkRequested(requested)
 
-        throw ServiceException(
-            when (issueMode) {
-                CouponIssueMode.QUEUE -> ErrorCode.QUEUE_ONLY_COUPON_EVENT
-                CouponIssueMode.DIRECT -> ErrorCode.DIRECT_ONLY_COUPON_EVENT
-            },
-        )
-    }
-
-    /**
-     * 지금 발급할 수 있는 상태인지 확인하고, 아니라면 이유에 맞는 예외를 던진다.
-     * enum 을 대상으로 한 when 은 모든 값을 다루지 않으면 컴파일 에러가 난다. 나중에 상태가 추가돼도 여기서 놓치지 않는다.
-     */
-    fun checkIssuable(now: LocalDateTime) {
-        when (status(now)) {
-            CouponEventStatus.UPCOMING -> throw ServiceException(ErrorCode.COUPON_EVENT_NOT_STARTED)
-            CouponEventStatus.ENDED -> throw ServiceException(ErrorCode.COUPON_EVENT_ENDED)
-            CouponEventStatus.SOLD_OUT -> throw ServiceException(ErrorCode.COUPON_SOLD_OUT)
-            CouponEventStatus.ONGOING -> Unit
-        }
-    }
+    /** 지금 발급할 수 있는 상태인지 확인하고, 아니라면 이유에 맞는 예외를 던진다. */
+    fun checkIssuable(now: LocalDateTime) = status(now).checkIssuable()
 
     /**
      * 메모리에서 issuedQuantity 를 quantity 만큼 올린다. (커밋 시점에 dirty checking 으로 UPDATE)

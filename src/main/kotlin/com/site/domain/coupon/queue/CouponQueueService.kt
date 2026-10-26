@@ -1,17 +1,12 @@
 package com.site.domain.coupon.queue
 
 import com.site.domain.coupon.entity.CouponIssueMode
-import com.site.domain.coupon.entity.EventPeriod
 import com.site.domain.coupon.queue.port.CouponQueueStore
 import com.site.domain.coupon.queue.port.EnqueueResult
-import com.site.domain.coupon.repository.CouponEventRepository
+import com.site.domain.coupon.service.StartedCouponEventCache
 import com.site.independent.error.exception.ServiceException
 import com.site.independent.type.ErrorCode
-import org.springframework.data.repository.findByIdOrNull
 import org.springframework.stereotype.Service
-import java.time.Clock
-import java.time.LocalDateTime
-import java.util.concurrent.ConcurrentHashMap
 
 /**
  * 선착순 대기열. 요청 스레드는 Redis 에 줄만 세우고 바로 응답한다. 실제 발급(DB)은 CouponQueueWorker 가 순서대로 처리한다.
@@ -21,18 +16,12 @@ import java.util.concurrent.ConcurrentHashMap
 @Service
 class CouponQueueService(
     private val couponQueueStore: CouponQueueStore,
-    private val couponEventRepository: CouponEventRepository,
-    private val clock: Clock,
+    private val startedCouponEvents: StartedCouponEventCache,
 ) {
 
-    /**
-     * 진행 중인 이벤트의 기간을 메모리에 캐시한다. 줄 서기 요청마다 DB 를 읽지 않기 위해서다.
-     * 시작된 이벤트는 수정·삭제가 막혀 있으므로(2단계 규칙) 캐시한 값이 바뀔 일이 없다.
-     */
-    private val ongoingPeriods = ConcurrentHashMap<Long, EventPeriod>()
-
     fun enqueue(couponEventId: Long, memberId: Long): CouponQueueStatus {
-        checkOngoing(couponEventId)
+        // 줄 서기 요청마다 DB 를 읽지 않도록 메모리 캐시로 확인한다
+        startedCouponEvents.checkIssuable(couponEventId, CouponIssueMode.QUEUE)
 
         return when (val result = couponQueueStore.enqueue(couponEventId, memberId)) {
             is EnqueueResult.Enqueued -> {
@@ -52,25 +41,6 @@ class CouponQueueService(
             ?.let { return CouponQueueStatus.Waiting(position = it + 1) }
 
         return if (couponQueueStore.isProcessing(couponEventId, memberId)) CouponQueueStatus.Processing else CouponQueueStatus.NotInQueue
-    }
-
-    private fun checkOngoing(couponEventId: Long) {
-        val now = LocalDateTime.now(clock)
-
-        ongoingPeriods[couponEventId]?.let { period ->
-            if (period.isEnded(now)) {
-                ongoingPeriods.remove(couponEventId)
-                throw ServiceException(ErrorCode.COUPON_EVENT_ENDED)
-            }
-            return
-        }
-
-        val couponEvent = couponEventRepository.findByIdOrNull(couponEventId)
-            ?: throw ServiceException(ErrorCode.COUPON_EVENT_NOT_FOUND)
-        couponEvent.checkIssueMode(CouponIssueMode.QUEUE)
-        couponEvent.checkIssuable(now)
-        // 발급 방식까지 확인한 뒤에만 캐시하므로, 캐시에 있으면 QUEUE 이벤트다 (시작 후에는 방식을 바꿀 수 없다)
-        ongoingPeriods[couponEventId] = couponEvent.period
     }
 
     private fun closedErrorCode(couponEventId: Long): ErrorCode =

@@ -9,6 +9,7 @@ import com.site.domain.coupon.repository.CouponEventRepository
 import com.site.domain.coupon.repository.IssuedCouponRepository
 import com.site.domain.coupon.service.CouponIssueFacade
 import com.site.domain.coupon.service.CouponIssueMetrics
+import com.site.domain.coupon.service.CouponIssueService
 import com.site.domain.notification.repository.NotificationOutboxRepository
 import com.site.independent.error.exception.ServiceException
 import com.site.support.IntegrationTest
@@ -34,6 +35,7 @@ class ObservabilityTest @Autowired constructor(
     private val mockMvc: MockMvc,
     private val meterRegistry: MeterRegistry,
     private val couponIssueFacade: CouponIssueFacade,
+    private val couponIssueService: CouponIssueService,
     private val couponQueueService: CouponQueueService,
     private val couponQueueWorker: CouponQueueWorker,
     private val couponQueueStore: CouponQueueStore,
@@ -53,18 +55,25 @@ class ObservabilityTest @Autowired constructor(
     }
 
     @Test
-    fun `즉시 발급 결과를 mode·result 태그로 세고, 락 대기 시간을 기록한다`() {
+    fun `즉시 발급 결과를 mode·result 태그로 센다`() {
         val couponEventId = couponEventRepository.save(couponEventFixture(totalQuantity = 1)).id
         val issuedBefore = issueCount("direct", "issued")
         val soldOutBefore = issueCount("direct", "sold_out")
-        val lockWaitsBefore = lockWaitCount()
 
         couponIssueFacade.issue(couponEventId, memberId = 1L)
         assertThrows<ServiceException> { couponIssueFacade.issue(couponEventId, memberId = 2L) }
 
         assertEquals(issuedBefore + 1, issueCount("direct", "issued"))
         assertEquals(soldOutBefore + 1, issueCount("direct", "sold_out"))
-        // 두 번째 요청은 사전 검사에서 거절돼 락까지 가지 않는다
+    }
+
+    @Test
+    fun `분산락으로 발급하면 락 대기 시간을 기록한다`() {
+        val couponEventId = couponEventRepository.save(couponEventFixture()).id
+        val lockWaitsBefore = lockWaitCount()
+
+        couponIssueService.issueWithDistributedLock(couponEventId, memberId = 1L)
+
         assertEquals(lockWaitsBefore + 1, lockWaitCount())
     }
 
@@ -100,6 +109,7 @@ class ObservabilityTest @Autowired constructor(
     fun `Prometheus 수집 경로로 커스텀 지표가 나간다`() {
         val couponEventId = couponEventRepository.save(couponEventFixture()).id
         couponIssueFacade.issue(couponEventId, memberId = 1L)
+        couponIssueService.issueWithDistributedLock(couponEventId, memberId = 2L) // 락 대기 지표는 분산락을 거쳐야 생긴다
         mockMvc.get("/actuator/health") // HTTP 요청 지표는 요청이 끝나야 생긴다
 
         val body = mockMvc.get("/actuator/prometheus")
