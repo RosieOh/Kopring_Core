@@ -1,6 +1,7 @@
 package com.site.domain.coupon.service
 
 import com.site.domain.coupon.entity.CouponEvent
+import com.site.domain.coupon.entity.CouponEventStatus
 import com.site.domain.coupon.entity.CouponIssueMode
 import com.site.domain.coupon.entity.IssuedCoupon
 import com.site.domain.coupon.event.CouponIssuedEvent
@@ -74,6 +75,45 @@ class CouponIssueService(
     }
 
     /**
+     * 대기열 워커 전용: 꺼낸 회원들을 한 트랜잭션에서 한꺼번에 발급한다.
+     *
+     * 이벤트 행을 잠그고(SELECT ... FOR UPDATE) 남은 수량만큼 앞사람부터 나눠 준다. 회원마다 트랜잭션을 열면
+     * 커밋(디스크 기록)이 회원 수만큼 일어나지만, 여기서는 배치당 한 번이다.
+     * 이미 받은 회원(이전 처리 도중 워커가 죽은 경우)은 다시 발급하지 않고 발급된 것으로 돌려준다. (다시 처리해도 안전하다)
+     * 행 잠금 덕분에 워커가 여러 대여도 수량을 넘지 않는다.
+     */
+    @Transactional
+    fun issueQueuedBatch(couponEventId: Long, memberIds: List<Long>): QueuedBatchIssueResult {
+        val now = now()
+        val couponEvent = couponEventRepository.findByIdForUpdate(couponEventId)
+            ?: throw ServiceException(ErrorCode.COUPON_EVENT_NOT_FOUND)
+        couponEvent.checkIssueMode(CouponIssueMode.QUEUE)
+
+        val alreadyIssued = issuedCouponRepository.findIssuedMemberIds(couponEventId, memberIds).toSet()
+        val candidates = memberIds.filterNot { it in alreadyIssued }
+        val status = couponEvent.status(now)
+        val winners = if (status == CouponEventStatus.ONGOING) candidates.take(couponEvent.remainingQuantity) else emptyList()
+
+        if (winners.isNotEmpty()) {
+            couponEvent.issue(now, quantity = winners.size)
+            val expiresAt = couponEvent.couponExpiresAt(now)
+            issuedCouponRepository.saveAll(winners.map { IssuedCoupon(couponEventId = couponEventId, memberId = it, expiresAt = expiresAt) })
+                .forEach { notificationOutboxService.recordCouponIssued(CouponIssuedEvent(it.id, couponEventId, it.memberId)) }
+        }
+
+        val issued = alreadyIssued + winners
+        return QueuedBatchIssueResult(
+            issued = memberIds.filter { it in issued },
+            rejected = candidates.drop(winners.size),
+            rejectReason = when (status) {
+                CouponEventStatus.ENDED -> ErrorCode.COUPON_EVENT_ENDED
+                CouponEventStatus.UPCOMING -> ErrorCode.COUPON_EVENT_NOT_STARTED
+                else -> ErrorCode.COUPON_SOLD_OUT
+            },
+        )
+    }
+
+    /**
      * 락 없이 가볍게 확인한다. (CouponIssueFacade 의 빠른 거절용)
      * 여기를 통과해도 발급이 보장되지는 않는다. 락 안에서 같은 검사를 다시 한다.
      */
@@ -122,3 +162,14 @@ class CouponIssueService(
 
     private fun now(): LocalDateTime = LocalDateTime.now(clock)
 }
+
+/**
+ * 일괄 발급 결과. 꺼낸 회원은 issued 나 rejected 중 한쪽에 들어간다.
+ * @property issued 이번에 발급했거나 이미 받아 둔 회원 (꺼낸 순서 유지)
+ * @property rejected 발급하지 못한 회원. 이유는 rejectReason (소진 / 종료)
+ */
+data class QueuedBatchIssueResult(
+    val issued: List<Long>,
+    val rejected: List<Long>,
+    val rejectReason: ErrorCode,
+)
