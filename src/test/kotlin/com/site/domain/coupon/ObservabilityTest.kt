@@ -116,7 +116,15 @@ class ObservabilityTest @Autowired constructor(
             .andExpect { status { isOk() } }
             .andReturn().response.contentAsString
 
-        listOf("coupon_issue_requests_total", "lock_wait_seconds_bucket", "notification_outbox_pending", "http_server_requests_seconds_bucket")
+        listOf(
+            "coupon_issue_requests_total",
+            "lock_wait_seconds_bucket",
+            "notification_outbox_pending",
+            "http_server_requests_seconds_bucket",
+            // 처리 중인 요청 수 (Grafana "처리 중인 HTTP 요청"). http.server.requests 히스토그램 설정이 접두어로 함께 걸려서
+            // LongTaskTimer 가 게이지 히스토그램으로 나가고, 개수는 _gcount 에 담긴다
+            "http_server_requests_active_seconds_gcount",
+        )
             .forEach { name -> assertTrue(body.contains(name)) { "$name 지표가 없습니다" } }
     }
 
