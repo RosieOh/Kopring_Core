@@ -1,7 +1,7 @@
-# 로컬에서 ./gradlew bootRun 으로 띄운 앱(호스트 8080)의 지표를 5초마다 가져온다
+# 로컬에서 ./gradlew bootRun 으로 띄운 앱(호스트 8080)의 지표를 1초마다 가져온다 (몇 초짜리 부하 테스트도 놓치지 않게)
 global:
-  scrape_interval: 5s
-  evaluation_interval: 5s
+  scrape_interval: 1s
+  evaluation_interval: 1s
 
 scrape_configs:
   - job_name: kopring-core
