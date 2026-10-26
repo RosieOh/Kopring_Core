@@ -11,6 +11,8 @@ import org.springframework.data.repository.findByIdOrNull
 import org.springframework.stereotype.Component
 import java.time.Clock
 import java.time.LocalDateTime
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.CompletionException
 import java.util.concurrent.ConcurrentHashMap
 
 /**
@@ -31,15 +33,13 @@ class StartedCouponEventCache(
 
     private val events = ConcurrentHashMap<Long, StartedCouponEvent>()
 
-    /**
-     * 지금 [mode] 방식으로 발급을 시도해도 되는지 확인한다. 통과해도 발급이 보장되지는 않는다.
-     *
-     * 오픈 직후 처음 몇 ms 동안은 캐시가 비어 있어 동시에 들어온 요청이 각자 DB 를 읽을 수 있다.
-     * 한 요청만 읽게 막으려면(single-flight) 나머지를 기다리게 해야 하는데, 그 정도 중복은 감수하고 단순하게 둔다.
-     */
+    /** 지금 DB 에서 읽고 있는 이벤트. 같은 이벤트를 읽으려는 다른 요청은 새로 읽지 않고 이 결과를 기다린다 */
+    private val loading = ConcurrentHashMap<Long, CompletableFuture<StartedCouponEvent>>()
+
+    /** 지금 [mode] 방식으로 발급을 시도해도 되는지 확인한다. 통과해도 발급이 보장되지는 않는다. */
     fun checkIssuable(couponEventId: Long, mode: CouponIssueMode) {
         val now = LocalDateTime.now(clock)
-        val event = events[couponEventId] ?: load(couponEventId, now)
+        val event = events[couponEventId] ?: loadOnce(couponEventId, now)
 
         event.issueMode.checkRequested(mode)
         val status = event.status(now)
@@ -53,6 +53,38 @@ class StartedCouponEventCache(
     fun markSoldOut(couponEventId: Long) {
         events.computeIfPresent(couponEventId) { _, event -> event.copy(soldOut = true) }
     }
+
+    /**
+     * 같은 이벤트를 동시에 처음 요청하면 한 요청만 DB 를 읽고, 나머지는 그 결과를 기다린다. (single-flight)
+     *
+     * 오픈 순간에는 캐시가 비어 있어서, 동시에 들어온 요청이 각자 DB 를 읽으면 그 수만큼 커넥션 풀에 줄을 선다.
+     * 가상 스레드에서는 스레드 수 제한이 없어 수천 개가 한꺼번에 몰린다. (부하 테스트에서 커넥션 대기 1,416)
+     *
+     * computeIfAbsent 로 하지 않은 이유: 읽는 동안 같은 칸의 다른 스레드를 synchronized 로 막는데,
+     * JDK 21 가상 스레드는 synchronized 에서 기다리는 동안 캐리어(운영체제 스레드)를 놓지 못한다.
+     * CompletableFuture 를 기다리는 것은 일반 park 라서 캐리어를 놓는다.
+     */
+    private fun loadOnce(couponEventId: Long, now: LocalDateTime): StartedCouponEvent {
+        val mine = CompletableFuture<StartedCouponEvent>()
+        loading.putIfAbsent(couponEventId, mine)?.let { inFlight -> return awaitLoad(inFlight) }
+
+        try {
+            return load(couponEventId, now).also { mine.complete(it) }
+        } catch (e: Exception) {
+            mine.completeExceptionally(e)
+            throw e
+        } finally {
+            loading.remove(couponEventId, mine)
+        }
+    }
+
+    /** 다른 요청이 읽은 결과를 기다린다. 그 요청이 실패했다면(없는 이벤트 등) 같은 예외를 던진다 */
+    private fun awaitLoad(inFlight: CompletableFuture<StartedCouponEvent>): StartedCouponEvent =
+        try {
+            inFlight.join()
+        } catch (e: CompletionException) {
+            throw e.cause ?: e
+        }
 
     private fun load(couponEventId: Long, now: LocalDateTime): StartedCouponEvent {
         val couponEvent = couponEventRepository.findByIdOrNull(couponEventId)
