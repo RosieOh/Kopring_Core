@@ -1,5 +1,6 @@
 package com.site.domain.coupon.queue
 
+import com.site.domain.coupon.entity.CouponIssueMode
 import com.site.domain.coupon.queue.port.CouponQueueStore
 import com.site.domain.coupon.service.CouponIssueMetrics
 import com.site.domain.coupon.service.CouponIssueService
@@ -87,7 +88,7 @@ class CouponQueueWorker(
     /** 일괄 발급이 실패했을 때의 대안: 한 명씩 원자적 UPDATE 로 발급한다 */
     private fun issueOne(couponEventId: Long, memberId: Long): CouponQueueResult =
         try {
-            couponIssueService.issueWithAtomicUpdate(couponEventId, memberId)
+            couponIssueService.issueWithAtomicUpdate(couponEventId, memberId, CouponIssueMode.QUEUE)
             CouponQueueResult.ISSUED
         } catch (e: ServiceException) {
             e.errorCode.toQueueResult()

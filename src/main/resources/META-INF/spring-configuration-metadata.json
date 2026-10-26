@@ -20,6 +20,11 @@
       "description": "알림 Outbox 스케줄러 설정"
     },
     {
+      "name": "coupon.issue",
+      "type": "com.site.domain.coupon.service.CouponIssueProperties",
+      "description": "선착순 쿠폰 발급 설정"
+    },
+    {
       "name": "coupon.queue",
       "type": "com.site.domain.coupon.queue.CouponQueueProperties",
       "description": "선착순 대기열 설정"
@@ -125,6 +130,12 @@
       "type": "java.lang.Long",
       "defaultValue": 5000,
       "description": "Outbox 스케줄러 실행 간격(ms)."
+    },
+    {
+      "name": "coupon.issue.direct-strategy",
+      "type": "com.site.domain.coupon.service.DirectIssueStrategy",
+      "defaultValue": "atomic-update",
+      "description": "즉시 발급의 동시성 제어 방식. atomic-update(원자적 조건부 UPDATE) 또는 distributed-lock(Redis 분산락)."
     },
     {
       "name": "coupon.queue.batch-size",
