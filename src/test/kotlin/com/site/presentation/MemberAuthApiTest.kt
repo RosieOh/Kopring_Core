@@ -4,7 +4,11 @@ import com.fasterxml.jackson.databind.ObjectMapper
 import com.site.domain.member.entity.Member
 import com.site.domain.member.entity.MemberRole
 import com.site.domain.member.repository.MemberRepository
+import com.site.infrastructure.security.jwt.JwtProperties
 import com.site.support.IntegrationTest
+import io.jsonwebtoken.Jwts
+import io.jsonwebtoken.io.Decoders
+import io.jsonwebtoken.security.Keys
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.Assertions.assertNotEquals
 import org.junit.jupiter.api.Test
@@ -16,6 +20,7 @@ import org.springframework.test.web.servlet.MockMvc
 import org.springframework.test.web.servlet.MvcResult
 import org.springframework.test.web.servlet.get
 import org.springframework.test.web.servlet.post
+import java.util.Date
 
 @IntegrationTest
 class MemberAuthApiTest @Autowired constructor(
@@ -23,6 +28,7 @@ class MemberAuthApiTest @Autowired constructor(
     private val objectMapper: ObjectMapper,
     private val memberRepository: MemberRepository,
     private val passwordEncoder: PasswordEncoder,
+    private val jwtProperties: JwtProperties,
 ) {
 
     @AfterEach
@@ -122,6 +128,22 @@ class MemberAuthApiTest @Autowired constructor(
             .andExpect {
                 status { isUnauthorized() }
                 jsonPath("$.code") { value("MALFORMED_TOKEN") }
+            }
+    }
+
+    @Test
+    fun `서명은 맞는데 role 클레임이 없는 토큰이면 500 이 아니라 401 INVALID_TOKEN`() {
+        val token = Jwts.builder()
+            .subject("1")
+            .id("token-id")
+            .expiration(Date(System.currentTimeMillis() + 60_000))
+            .signWith(Keys.hmacShaKeyFor(Decoders.BASE64.decode(jwtProperties.secret)))
+            .compact()
+
+        getMyInfo(token)
+            .andExpect {
+                status { isUnauthorized() }
+                jsonPath("$.code") { value("INVALID_TOKEN") }
             }
     }
 

@@ -3,6 +3,9 @@ package com.site.infrastructure.security.jwt
 import com.site.domain.member.entity.MemberRole
 import com.site.independent.error.exception.ServiceException
 import com.site.independent.type.ErrorCode
+import io.jsonwebtoken.Jwts
+import io.jsonwebtoken.io.Decoders
+import io.jsonwebtoken.security.Keys
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.datatest.withData
@@ -10,6 +13,7 @@ import io.kotest.matchers.shouldBe
 import io.kotest.matchers.shouldNotBe
 import io.kotest.matchers.string.shouldMatch
 import java.time.Duration
+import java.util.Date
 
 class JwtTokenProviderTest : FunSpec({
 
@@ -38,6 +42,37 @@ class JwtTokenProviderTest : FunSpec({
 
         first shouldMatch Regex("^[A-Za-z0-9_-]{43}$") // 32바이트 → Base64 URL-safe, 패딩 없음
         first shouldNotBe provider().createRefreshToken()
+    }
+
+    // 같은 키로 서명했지만 클레임 구성이 다른 토큰 (클레임 구성이 바뀌기 전의 토큰, 같은 키를 쓰는 다른 서비스 등)
+    fun signedToken(
+        subject: String? = "1",
+        role: Any? = "USER",
+        id: String? = "token-id",
+        expiresInSeconds: Long? = 600,
+    ): String =
+        Jwts.builder()
+            .apply { subject?.let { subject(it) } }
+            .apply { role?.let { claim("role", it) } }
+            .apply { id?.let { id(it) } }
+            .apply { expiresInSeconds?.let { expiration(Date(System.currentTimeMillis() + it * 1_000)) } }
+            .signWith(Keys.hmacShaKeyFor(Decoders.BASE64.decode(secret)))
+            .compact()
+
+    context("서명이 맞아도 클레임이 빠졌거나 형식이 다르면 500 이 아니라 INVALID_TOKEN(401)으로 거절한다") {
+        withData(
+            mapOf(
+                "role 클레임 없음" to signedToken(role = null),
+                "모르는 role" to signedToken(role = "SUPER"),
+                "role 이 문자열이 아님" to signedToken(role = 1),
+                "subject 없음" to signedToken(subject = null),
+                "subject 가 숫자가 아님" to signedToken(subject = "abc"),
+                "토큰 ID(jti) 없음" to signedToken(id = null),
+                "만료 시각 없음" to signedToken(expiresInSeconds = null),
+            ),
+        ) { token ->
+            shouldThrow<ServiceException> { provider().parseAccessToken(token) }.errorCode shouldBe ErrorCode.INVALID_TOKEN
+        }
     }
 
     context("받아들이지 않는 토큰은 이유에 맞는 에러 코드로 거절한다") {

@@ -5,6 +5,7 @@ import com.site.domain.member.entity.MemberRole
 import com.site.independent.error.exception.ServiceException
 import com.site.independent.type.ErrorCode
 import com.site.infrastructure.security.AuthMember
+import io.jsonwebtoken.Claims
 import io.jsonwebtoken.ExpiredJwtException
 import io.jsonwebtoken.JwtException
 import io.jsonwebtoken.JwtParser
@@ -61,12 +62,19 @@ class JwtTokenProvider(
             throw ServiceException(e.toErrorCode())
         }
 
-        return AuthMember(
-            memberId = claims.subject.toLong(),
-            role = MemberRole.valueOf(claims.get(ROLE_CLAIM, String::class.java)),
-            tokenId = claims.id,
-            tokenExpiresAt = claims.expiration.toInstant(),
-        )
+        // 서명이 맞아도 이 서비스가 넣는 클레임이 빠졌거나 형식이 다르면 401 로 거절한다. (클레임 구성이 바뀌기 전의 토큰 등)
+        // 그대로 꺼내면 NPE·NumberFormatException 이 위의 catch 밖으로 새어, ServiceException 만 잡는 필터를 지나 500 이 된다.
+        return claims.toAuthMemberOrNull() ?: throw ServiceException(ErrorCode.INVALID_TOKEN)
+    }
+
+    private fun Claims.toAuthMemberOrNull(): AuthMember? {
+        val memberId = subject?.toLongOrNull() ?: return null
+        // get(name, String::class.java) 는 타입이 다르면 RequiredTypeException 을 던지므로 as? 로 꺼낸다
+        val roleName = this[ROLE_CLAIM] as? String ?: return null
+        val role = MemberRole.entries.firstOrNull { it.name == roleName } ?: return null
+        val tokenId = id ?: return null
+        val expiresAt = expiration ?: return null
+        return AuthMember(memberId = memberId, role = role, tokenId = tokenId, tokenExpiresAt = expiresAt.toInstant())
     }
 
     // when + is 로 예외 타입별 분기 (스마트 캐스트)
