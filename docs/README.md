@@ -24,6 +24,13 @@
 - 코드 블록 위에 링크가 붙어 있으면 **저장소 코드를 그대로 옮긴 것**입니다.
 - 저장소에 없는 코드는 `// 예시` 라고 표시했습니다.
 - 인용은 M6(코드 리뷰 정리)까지 끝난 코드 기준입니다. 코드가 바뀌면 링크 쪽이 최신입니다.
+- **브라우저에서 책처럼 읽기**: [docs/book/index.html](book/index.html) 을 브라우저로 여세요. 장 목록·이 장의 목차·이전/다음 장·다크 모드가 있고, 코드는 색칠돼 있습니다. Mermaid 그림과 글꼴은 인터넷이 있을 때 보입니다.
+- Markdown 이 원본이고 HTML 은 [build.py](book/build.py) 가 만듭니다. Markdown 을 고쳤다면 HTML 도 다시 만들어 함께 커밋하세요. CI 가 둘이 맞는지 확인합니다.
+
+```bash
+python3 -m venv .venv && .venv/bin/pip install -r docs/book/requirements.txt   # 처음 한 번
+.venv/bin/python docs/book/build.py                                             # docs/*.md → docs/book/*.html
+```
 
 ## 목차
 

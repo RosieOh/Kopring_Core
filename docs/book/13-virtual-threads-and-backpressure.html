@@ -1,0 +1,437 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>13장. 심화: 가상 스레드와 몰림 대응 — 코프링 교재</title>
+<meta name="description" content="선착순 쿠폰 코드로 배우는 Kotlin + Spring Boot">
+<script>try{var t=localStorage.getItem("book-theme");if(t)document.documentElement.dataset.theme=t;}catch(e){}</script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+<link rel="stylesheet" href="assets/book.css">
+<link rel="stylesheet" href="assets/highlight.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11.4.1/dist/mermaid.min.js" defer></script>
+<script src="assets/book.js" defer></script>
+</head>
+<body>
+<a class="skip-link" href="#content">본문으로 건너뛰기</a>
+<header class="topbar">
+  <button type="button" class="menu-button" aria-label="장 목록 열기" aria-expanded="false" aria-controls="sidebar">목차</button>
+  <a class="topbar-title" href="index.html">코프링 교재</a>
+  <button type="button" class="theme-button" aria-label="밝은 화면과 어두운 화면 바꾸기">화면</button>
+</header>
+<div class="layout">
+<aside class="sidebar" id="sidebar">
+  <a class="sidebar-title" href="index.html">코프링 교재<small>선착순 쿠폰으로 배우는 Kotlin + Spring Boot</small></a>
+  <nav aria-label="장 목록"><ol class="chapter-list">
+<li><a href="index.html">처음에 — 읽는 법과 목차</a></li>
+<li><a href="01-kotlin-basics.html">1장. Kotlin 기초</a></li>
+<li><a href="02-spring-meets-kotlin.html">2장. 스프링이 Kotlin 을 만나면</a></li>
+<li><a href="03-architecture.html">3장. 프로젝트 구조와 계층</a></li>
+<li><a href="04-jpa-with-kotlin.html">4장. JPA 엔티티를 Kotlin 으로</a></li>
+<li><a href="05-web-and-errors.html">5장. 웹 계층과 예외 처리</a></li>
+<li><a href="06-auth.html">6장. 인증</a></li>
+<li><a href="07-concurrency.html">7장. 동시성 제어</a></li>
+<li><a href="08-async-and-reliability.html">8장. 비동기와 신뢰성</a></li>
+<li><a href="09-redis-queue.html">9장. Redis 대기열</a></li>
+<li><a href="10-testing.html">10장. 테스트</a></li>
+<li><a href="11-observability-and-load-test.html">11장. 관측과 부하 테스트</a></li>
+<li><a href="12-next-steps-and-exercises.html">12장. 다음 공부와 연습 문제</a></li>
+<li><a href="13-virtual-threads-and-backpressure.html" aria-current="page">13장. 심화: 가상 스레드와 몰림 대응</a></li>
+  </ol></nav>
+</aside>
+<main id="content" class="content">
+<article class="markdown">
+<h1 id="13장-심화-가상-스레드와-몰림-대응">13장. 심화: 가상 스레드와 몰림 대응 <a class="header-anchor" href="#13장-심화-가상-스레드와-몰림-대응">#</a></h1>
+<blockquote>
+<p>한 줄 요약: 스레드 제한을 풀면 &quot;기다리는 요청&quot;이 다른 곳으로 옮겨 갈 뿐 사라지지 않는다. 그 줄이 어디에 서는지 정하는 것이 몰림 대응이다.</p>
+</blockquote>
+<p>이 장은 M5(몰림 대응)에서 실제로 겪은 일을 따라갑니다. 계획은 세 줄이었습니다. 조회 힌트 고치기, 발급 동시 실행 제한, 가상 스레드 켜기. 하지만 부하 테스트를 돌릴 때마다 예상하지 못한 문제가 하나씩 나왔고, 그것을 고친 과정이 이 장의 대부분입니다.</p>
+<h2 id="1-문제--몰림이-다른-기능까지-느리게-한다">1. 문제 — 몰림이 다른 기능까지 느리게 한다 <a class="header-anchor" href="#1-문제--몰림이-다른-기능까지-느리게-한다">#</a></h2>
+<p>M4 의 즉시 발급(원자적 UPDATE)에 2,000명이 몰리는 동안, 다른 사용자가 <strong>이벤트 목록</strong>(DB 를 읽는 평범한 API)을 초당 50번 불렀습니다.</p>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th></th>
+<th>발급 응답 p95</th>
+<th>같은 시간 목록 조회 p95</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>M4</td>
+<td>2.3~16.3초</td>
+<td><strong>1.9~17.0초</strong></td>
+</tr>
+</tbody>
+</table></div>
+<p>목록 조회는 쿠폰과 상관이 없는데, 발급과 똑같이 느려졌습니다. 줄이 두 군데 생기기 때문입니다.</p>
+<figure class="diagram"><pre class="mermaid" data-source="flowchart LR
+    U[&quot;요청 2,000개&quot;] --&gt; T[&quot;Tomcat 스레드 200개&lt;br/&gt;(나머지는 접속 대기)&quot;]
+    T --&gt; P[&quot;DB 커넥션 10개&lt;br/&gt;(나머지는 커넥션 대기)&quot;]
+    P --&gt; R[&quot;이벤트 행 잠금&lt;br/&gt;(발급은 한 번에 하나)&quot;]
+    B[&quot;목록 조회&quot;] --&gt; T
+">flowchart LR
+    U[&quot;요청 2,000개&quot;] --&gt; T[&quot;Tomcat 스레드 200개&lt;br/&gt;(나머지는 접속 대기)&quot;]
+    T --&gt; P[&quot;DB 커넥션 10개&lt;br/&gt;(나머지는 커넥션 대기)&quot;]
+    P --&gt; R[&quot;이벤트 행 잠금&lt;br/&gt;(발급은 한 번에 하나)&quot;]
+    B[&quot;목록 조회&quot;] --&gt; T
+</pre></figure>
+<ol>
+<li><strong>스레드 줄</strong>: Tomcat 은 요청 하나에 스레드 하나를 붙입니다. 200개가 다 차면 목록 조회도 스레드를 기다립니다.</li>
+<li><strong>커넥션 줄</strong>: 원자적 UPDATE 는 행 잠금을 기다리는 동안 DB 커넥션을 쥡니다. 10개가 다 차면 목록 조회도 커넥션을 기다립니다.</li>
+</ol>
+<p>행 잠금 때문에 발급은 어차피 한 번에 하나씩 진행됩니다. 커넥션을 10개 쥐어도 발급은 빨라지지 않고, 다른 API 만 굶습니다.</p>
+<h2 id="2-개념">2. 개념 <a class="header-anchor" href="#2-개념">#</a></h2>
+<h3 id="가상-스레드-java-21">가상 스레드 (Java 21) <a class="header-anchor" href="#가상-스레드-java-21">#</a></h3>
+<p>플랫폼 스레드는 운영체제 스레드와 1:1 입니다. 메모리를 많이 쓰고 만들기 비싸서 풀(pool)에 수백 개만 둡니다.
+가상 스레드는 JVM 이 관리하는 가벼운 스레드입니다. 실제 실행은 소수의 운영체제 스레드(<strong>캐리어</strong>, 기본은 코어 수만큼) 위에 올라가서 합니다.</p>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>상황</th>
+<th>플랫폼 스레드</th>
+<th>가상 스레드</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>DB·Redis 응답을 기다림</td>
+<td>운영체제 스레드를 쥔 채 기다림</td>
+<td>캐리어에서 내려옴(unmount). 캐리어는 다른 가상 스레드를 돌림</td>
+</tr>
+<tr>
+<td>동시에 기다리는 요청 수</td>
+<td>스레드 수(200)가 상한</td>
+<td>사실상 상한 없음</td>
+</tr>
+<tr>
+<td><code>synchronized</code> 안에서 기다림 (JDK 21)</td>
+<td>그대로 기다림</td>
+<td><strong>캐리어를 쥔 채 기다림(고정, pinning)</strong></td>
+</tr>
+</tbody>
+</table></div>
+<p>마지막 줄이 이 장의 핵심 사고로 이어집니다. JDK 24(JEP 491)부터는 <code>synchronized</code> 에서도 캐리어를 놓지만, 이 프로젝트는 JDK 21 입니다.</p>
+<h3 id="격벽bulkhead">격벽(bulkhead) <a class="header-anchor" href="#격벽bulkhead">#</a></h3>
+<p>배 안을 여러 칸으로 나눠 두면 한 칸에 물이 차도 배가 가라앉지 않습니다. 자원도 같습니다. <strong>한 기능이 쓸 수 있는 몫을 정해 두면</strong>, 그 기능이 몰려도 나머지 기능은 자기 몫을 씁니다.
+이 프로젝트에서는 &quot;발급은 DB 커넥션을 최대 5개까지만&quot; 이 격벽입니다.</p>
+<h2 id="3-프로젝트-코드로-보기">3. 프로젝트 코드로 보기 <a class="header-anchor" href="#3-프로젝트-코드로-보기">#</a></h2>
+<h3 id="가상-스레드-켜기">가상 스레드 켜기 <a class="header-anchor" href="#가상-스레드-켜기">#</a></h3>
+<p><a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/main/resources/application.properties#L9-L11" target="_blank" rel="noopener">application.properties</a></p>
+<figure class="code-block"><figcaption><span class="code-lang">properties</span><button type="button" class="copy-button" aria-label="코드 복사">복사</button></figcaption><div class="highlight"><pre><span></span><code><span class="c1"># 가상 스레드(Java 21): 요청 스레드가 Redis·DB 응답을 기다리는 동안 운영체제 스레드를 내려놓는다. 몰림에서 Tomcat 스레드 200개라는 상한이 사라진다.</span>
+<span class="c1"># 상한이 사라진 만큼 DB 커넥션 앞에 더 많은 요청이 몰리므로, 발급은 동시 실행 제한(coupon.issue.bulkhead)과 함께 쓴다.</span>
+<span class="na">spring.threads.virtual.enabled</span><span class="o">=</span><span class="s">true</span>
+</code></pre></div>
+</figure>
+<p>설정 한 줄이면 Tomcat 의 요청 처리가 가상 스레드로 바뀝니다. 그런데 이 한 줄이 스케줄러도 바꿉니다.</p>
+<h3 id="함정-1--스케줄러가-스레드-하나로-줄어든다">함정 1 — 스케줄러가 스레드 하나로 줄어든다 <a class="header-anchor" href="#함정-1--스케줄러가-스레드-하나로-줄어든다">#</a></h3>
+<p><a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/main/kotlin/com/site/infrastructure/async/SchedulingConfig.kt#L9-L23" target="_blank" rel="noopener">SchedulingConfig.kt</a></p>
+<figure class="code-block"><figcaption><span class="code-lang">Kotlin</span><button type="button" class="copy-button" aria-label="코드 복사">복사</button></figcaption><div class="highlight"><pre><span></span><code><span class="nd">@Configuration</span>
+<span class="nd">@EnableScheduling</span>
+<span class="kd">class</span><span class="w"> </span><span class="nc">SchedulingConfig</span><span class="w"> </span><span class="p">{</span>
+
+<span class="w">    </span><span class="cm">/**</span>
+<span class="cm">     * 가상 스레드를 켜도 스케줄러는 플랫폼 스레드 풀(spring.task.scheduling.pool.size)로 둔다.</span>
+<span class="cm">     *</span>
+<span class="cm">     * spring.threads.virtual.enabled=true 이면 스프링 부트는 SimpleAsyncTaskScheduler 를 쓰는데,</span>
+<span class="cm">     * 이 스케줄러는 fixed-delay 작업을 "스레드 하나"에서 차례로 돌린다. (fixed-delay 의미를 지키려고. spring-context 6.2 javadoc)</span>
+<span class="cm">     * 대기열 워커·알림 Outbox·SSE 스케줄러가 모두 fixed-delay 라서, 알림 발송(외부 API)이 느려지면 대기열 워커까지 밀린다.</span>
+<span class="cm">     * TaskScheduler 빈을 직접 등록하면 스프링 부트의 자동 설정은 물러난다.</span>
+<span class="cm">     */</span>
+<span class="w">    </span><span class="nd">@Bean</span>
+<span class="w">    </span><span class="kd">fun</span><span class="w"> </span><span class="nf">taskScheduler</span><span class="p">(</span><span class="n">builder</span><span class="p">:</span><span class="w"> </span><span class="n">ThreadPoolTaskSchedulerBuilder</span><span class="p">):</span><span class="w"> </span><span class="n">ThreadPoolTaskScheduler</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">builder</span><span class="p">.</span><span class="na">build</span><span class="p">()</span>
+<span class="p">}</span>
+</code></pre></div>
+</figure>
+<p>가상 스레드를 켜면 스프링 부트는 <code>SimpleAsyncTaskScheduler</code> 를 씁니다. 이 스케줄러는 <strong>fixed-delay 작업을 스레드 하나에서 차례로</strong> 돌립니다. 스프링 소스의 javadoc 에 그렇게 적혀 있습니다.
+이 프로젝트의 대기열 워커(200ms), 알림 Outbox, SSE 스케줄러는 모두 fixed-delay 입니다. 그대로 두면 알림 발송(외부 API)이 느려질 때 대기열 워커까지 밀립니다. 그래서 <code>TaskScheduler</code> 빈을 직접 등록해 스레드 3개짜리 풀로 고정했습니다.</p>
+<blockquote>
+<p>설정 한 줄을 바꿀 때는 그 설정이 <strong>무엇을 더 바꾸는지</strong> 문서와 소스로 확인하세요. 이 함정은 켜기 전에 spring-context 소스를 읽다가 찾았습니다.</p>
+</blockquote>
+<h3 id="발급-동시-실행-제한">발급 동시 실행 제한 <a class="header-anchor" href="#발급-동시-실행-제한">#</a></h3>
+<p><a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/main/kotlin/com/site/domain/coupon/service/CouponIssueBulkhead.kt#L11-L48" target="_blank" rel="noopener">CouponIssueBulkhead.kt</a></p>
+<figure class="code-block"><figcaption><span class="code-lang">Kotlin</span><button type="button" class="copy-button" aria-label="코드 복사">복사</button></figcaption><div class="highlight"><pre><span></span><code><span class="cm">/**</span>
+<span class="cm"> * 즉시 발급 단계의 동시 실행 수를 제한한다. (bulkhead — 배의 격벽처럼, 한 칸에 물이 차도 다른 칸은 지킨다)</span>
+<span class="cm"> *</span>
+<span class="cm"> * 원자적 UPDATE 는 모든 발급이 이벤트 한 행의 잠금에 줄을 서고, 줄을 서는 동안 DB 커넥션을 쥔다.</span>
+<span class="cm"> * 행 잠금 때문에 발급은 어차피 하나씩 진행되므로 커넥션을 많이 쥐어도 빨라지지 않고, 같은 풀을 쓰는 다른 API 만 커넥션을 못 얻는다.</span>
+<span class="cm"> * 그래서 발급은 커넥션을 최대 maxConcurrent 개까지만 쓰게 하고, 나머지 요청은 커넥션 없이 여기서 기다리게 한다.</span>
+<span class="cm"> * 커넥션 풀을 둘로 나누는 것과 같은 효과를, 데이터소스를 하나 더 만들지 않고 얻는다.</span>
+<span class="cm"> *</span>
+<span class="cm"> * - 공정(fair) 모드: 먼저 기다린 요청이 먼저 들어간다. 비공정 모드는 막 도착한 요청이 비는 자리를 가로챌 수 있다. (선착순의 새치기)</span>
+<span class="cm"> * - 서버마다 따로 센다. 서버가 N 대면 DB 전체로는 N × maxConcurrent 개까지 쓴다.</span>
+<span class="cm"> */</span>
+<span class="nd">@Component</span>
+<span class="kd">class</span><span class="w"> </span><span class="nc">CouponIssueBulkhead</span><span class="p">(</span>
+<span class="w">    </span><span class="n">properties</span><span class="p">:</span><span class="w"> </span><span class="n">CouponIssueProperties</span><span class="p">,</span>
+<span class="w">    </span><span class="kd">private</span><span class="w"> </span><span class="kd">val</span><span class="w"> </span><span class="nv">meterRegistry</span><span class="p">:</span><span class="w"> </span><span class="n">MeterRegistry</span><span class="p">,</span>
+<span class="p">)</span><span class="w"> </span><span class="p">{</span>
+
+<span class="w">    </span><span class="k">init</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">require</span><span class="p">(</span><span class="n">properties</span><span class="p">.</span><span class="na">bulkhead</span><span class="p">.</span><span class="na">maxConcurrent</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="m">0</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="s">"maxConcurrent must be positive: </span><span class="si">${</span><span class="n">properties</span><span class="p">.</span><span class="na">bulkhead</span><span class="p">.</span><span class="na">maxConcurrent</span><span class="si">}</span><span class="s">"</span><span class="w"> </span><span class="p">}</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="kd">private</span><span class="w"> </span><span class="kd">val</span><span class="w"> </span><span class="nv">permits</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Semaphore</span><span class="p">(</span><span class="n">properties</span><span class="p">.</span><span class="na">bulkhead</span><span class="p">.</span><span class="na">maxConcurrent</span><span class="p">,</span><span class="w"> </span><span class="kc">true</span><span class="p">)</span>
+<span class="w">    </span><span class="kd">private</span><span class="w"> </span><span class="kd">val</span><span class="w"> </span><span class="nv">maxWaitMillis</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">properties</span><span class="p">.</span><span class="na">bulkhead</span><span class="p">.</span><span class="na">maxWait</span><span class="p">.</span><span class="na">toMillis</span><span class="p">()</span>
+
+<span class="w">    </span><span class="kd">fun</span><span class="w"> </span><span class="o">&lt;</span><span class="n">T</span><span class="o">&gt;</span><span class="w"> </span><span class="nf">execute</span><span class="p">(</span><span class="n">action</span><span class="p">:</span><span class="w"> </span><span class="p">()</span><span class="w"> </span><span class="o">-&gt;</span><span class="w"> </span><span class="n">T</span><span class="p">):</span><span class="w"> </span><span class="n">T</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="kd">val</span><span class="w"> </span><span class="nv">waitStartedAt</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">System</span><span class="p">.</span><span class="na">nanoTime</span><span class="p">()</span>
+<span class="w">        </span><span class="kd">val</span><span class="w"> </span><span class="nv">acquired</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">permits</span><span class="p">.</span><span class="na">tryAcquire</span><span class="p">(</span><span class="n">maxWaitMillis</span><span class="p">,</span><span class="w"> </span><span class="n">TimeUnit</span><span class="p">.</span><span class="na">MILLISECONDS</span><span class="p">)</span>
+<span class="w">        </span><span class="n">recordWait</span><span class="p">(</span><span class="n">acquired</span><span class="p">,</span><span class="w"> </span><span class="n">System</span><span class="p">.</span><span class="na">nanoTime</span><span class="p">()</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">waitStartedAt</span><span class="p">)</span>
+<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="o">!</span><span class="n">acquired</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="k">throw</span><span class="w"> </span><span class="n">ServiceException</span><span class="p">(</span><span class="n">ErrorCode</span><span class="p">.</span><span class="na">COUPON_ISSUE_BUSY</span><span class="p">)</span>
+<span class="w">        </span><span class="p">}</span>
+
+<span class="w">        </span><span class="k">try</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="k">return</span><span class="w"> </span><span class="n">action</span><span class="p">()</span>
+<span class="w">        </span><span class="p">}</span><span class="w"> </span><span class="k">finally</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="n">permits</span><span class="p">.</span><span class="na">release</span><span class="p">()</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="w">    </span><span class="p">}</span>
+</code></pre></div>
+</figure>
+<ul>
+<li><code>Semaphore(5, true)</code>: 자리 5개. 두 번째 인자 <code>true</code> 는 <strong>공정 모드</strong>로, 먼저 기다린 요청이 먼저 들어갑니다. 선착순 서비스라서 새치기를 막아야 합니다.</li>
+<li><code>tryAcquire(maxWait)</code>: 자리를 정해진 시간까지만 기다립니다. 넘기면 503 으로 &quot;잠시 후 다시&quot; 를 알립니다.</li>
+<li>커넥션 풀을 진짜로 둘로 나누려면 데이터소스와 트랜잭션 매니저가 둘이 되어야 합니다. &quot;발급이 동시에 5개 넘게 들어가지 않게&quot;만 해도 같은 효과가 납니다.</li>
+</ul>
+<p>이 제한은 즉시 발급의 입구에서 씁니다.</p>
+<p><a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/main/kotlin/com/site/domain/coupon/service/CouponIssueFacade.kt#L33-L50" target="_blank" rel="noopener">CouponIssueFacade.kt</a></p>
+<figure class="code-block"><figcaption><span class="code-lang">Kotlin</span><button type="button" class="copy-button" aria-label="코드 복사">복사</button></figcaption><div class="highlight"><pre><span></span><code><span class="kd">fun</span><span class="w"> </span><span class="nf">issue</span><span class="p">(</span><span class="n">couponEventId</span><span class="p">:</span><span class="w"> </span><span class="kt">Long</span><span class="p">,</span><span class="w"> </span><span class="n">memberId</span><span class="p">:</span><span class="w"> </span><span class="kt">Long</span><span class="p">):</span><span class="w"> </span><span class="n">IssuedCoupon</span><span class="w"> </span><span class="o">=</span>
+<span class="w">    </span><span class="k">try</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">startedCouponEvents</span><span class="p">.</span><span class="na">checkIssuable</span><span class="p">(</span><span class="n">couponEventId</span><span class="p">,</span><span class="w"> </span><span class="n">CouponIssueMode</span><span class="p">.</span><span class="na">DIRECT</span><span class="p">)</span>
+<span class="w">        </span><span class="n">bulkhead</span><span class="p">.</span><span class="na">execute</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="c1">// 자리를 기다리는 사이에 소진됐을 수 있다. 메모리에서 다시 확인해, 소진 뒤 줄은 DB 를 거치지 않고 바로 빠지게 한다</span>
+<span class="w">            </span><span class="n">startedCouponEvents</span><span class="p">.</span><span class="na">checkIssuable</span><span class="p">(</span><span class="n">couponEventId</span><span class="p">,</span><span class="w"> </span><span class="n">CouponIssueMode</span><span class="p">.</span><span class="na">DIRECT</span><span class="p">)</span>
+<span class="w">            </span><span class="k">when</span><span class="w"> </span><span class="p">(</span><span class="n">properties</span><span class="p">.</span><span class="na">directStrategy</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">                </span><span class="n">DirectIssueStrategy</span><span class="p">.</span><span class="na">ATOMIC_UPDATE</span><span class="w"> </span><span class="o">-&gt;</span><span class="w"> </span><span class="n">couponIssueService</span><span class="p">.</span><span class="na">issueWithAtomicUpdate</span><span class="p">(</span><span class="n">couponEventId</span><span class="p">,</span><span class="w"> </span><span class="n">memberId</span><span class="p">,</span><span class="w"> </span><span class="n">CouponIssueMode</span><span class="p">.</span><span class="na">DIRECT</span><span class="p">)</span>
+<span class="w">                </span><span class="n">DirectIssueStrategy</span><span class="p">.</span><span class="na">DISTRIBUTED_LOCK</span><span class="w"> </span><span class="o">-&gt;</span><span class="w"> </span><span class="n">couponIssueService</span><span class="p">.</span><span class="na">issueWithDistributedLock</span><span class="p">(</span><span class="n">couponEventId</span><span class="p">,</span><span class="w"> </span><span class="n">memberId</span><span class="p">)</span>
+<span class="w">            </span><span class="p">}</span>
+<span class="w">        </span><span class="p">}.</span><span class="na">also</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">metrics</span><span class="p">.</span><span class="na">recordDirectIssued</span><span class="p">()</span><span class="w"> </span><span class="p">}</span>
+<span class="w">    </span><span class="p">}</span><span class="w"> </span><span class="k">catch</span><span class="w"> </span><span class="p">(</span><span class="n">e</span><span class="p">:</span><span class="w"> </span><span class="n">ServiceException</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">e</span><span class="p">.</span><span class="na">errorCode</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="n">ErrorCode</span><span class="p">.</span><span class="na">COUPON_SOLD_OUT</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="n">startedCouponEvents</span><span class="p">.</span><span class="na">markSoldOut</span><span class="p">(</span><span class="n">couponEventId</span><span class="p">)</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="w">        </span><span class="n">metrics</span><span class="p">.</span><span class="na">recordDirectFailed</span><span class="p">(</span><span class="n">e</span><span class="p">.</span><span class="na">errorCode</span><span class="p">)</span>
+<span class="w">        </span><span class="k">throw</span><span class="w"> </span><span class="n">e</span>
+<span class="w">    </span><span class="p">}</span>
+</code></pre></div>
+</figure>
+<p>자리를 얻은 뒤 <code>checkIssuable</code> 을 <strong>한 번 더</strong> 부르는 이유는 5절의 사고 4에서 나옵니다.</p>
+<h3 id="캐시-첫-로드--single-flight">캐시 첫 로드 — single-flight <a class="header-anchor" href="#캐시-첫-로드--single-flight">#</a></h3>
+<p><a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/main/kotlin/com/site/domain/coupon/service/StartedCouponEventCache.kt#L57-L87" target="_blank" rel="noopener">StartedCouponEventCache.kt</a></p>
+<figure class="code-block"><figcaption><span class="code-lang">Kotlin</span><button type="button" class="copy-button" aria-label="코드 복사">복사</button></figcaption><div class="highlight"><pre><span></span><code><span class="cm">/**</span>
+<span class="cm"> * 같은 이벤트를 동시에 처음 요청하면 한 요청만 DB 를 읽고, 나머지는 그 결과를 기다린다. (single-flight)</span>
+<span class="cm"> *</span>
+<span class="cm"> * 오픈 순간에는 캐시가 비어 있어서, 동시에 들어온 요청이 각자 DB 를 읽으면 그 수만큼 커넥션 풀에 줄을 선다.</span>
+<span class="cm"> * 가상 스레드에서는 스레드 수 제한이 없어 수천 개가 한꺼번에 몰린다. (부하 테스트에서 커넥션 대기 1,416)</span>
+<span class="cm"> *</span>
+<span class="cm"> * computeIfAbsent 로 하지 않은 이유: 읽는 동안 같은 칸의 다른 스레드를 synchronized 로 막는데,</span>
+<span class="cm"> * JDK 21 가상 스레드는 synchronized 에서 기다리는 동안 캐리어(운영체제 스레드)를 놓지 못한다.</span>
+<span class="cm"> * CompletableFuture 를 기다리는 것은 일반 park 라서 캐리어를 놓는다.</span>
+<span class="cm"> */</span>
+<span class="kd">private</span><span class="w"> </span><span class="kd">fun</span><span class="w"> </span><span class="nf">loadOnce</span><span class="p">(</span><span class="n">couponEventId</span><span class="p">:</span><span class="w"> </span><span class="kt">Long</span><span class="p">,</span><span class="w"> </span><span class="n">now</span><span class="p">:</span><span class="w"> </span><span class="n">LocalDateTime</span><span class="p">):</span><span class="w"> </span><span class="n">StartedCouponEvent</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kd">val</span><span class="w"> </span><span class="nv">mine</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">CompletableFuture</span><span class="o">&lt;</span><span class="n">StartedCouponEvent</span><span class="o">&gt;</span><span class="p">()</span>
+<span class="w">    </span><span class="n">loading</span><span class="p">.</span><span class="na">putIfAbsent</span><span class="p">(</span><span class="n">couponEventId</span><span class="p">,</span><span class="w"> </span><span class="n">mine</span><span class="p">)</span><span class="o">?.</span><span class="na">let</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">inFlight</span><span class="w"> </span><span class="o">-&gt;</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="n">awaitLoad</span><span class="p">(</span><span class="n">inFlight</span><span class="p">)</span><span class="w"> </span><span class="p">}</span>
+
+<span class="w">    </span><span class="k">try</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="n">load</span><span class="p">(</span><span class="n">couponEventId</span><span class="p">,</span><span class="w"> </span><span class="n">now</span><span class="p">).</span><span class="na">also</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">mine</span><span class="p">.</span><span class="na">complete</span><span class="p">(</span><span class="nb">it</span><span class="p">)</span><span class="w"> </span><span class="p">}</span>
+<span class="w">    </span><span class="p">}</span><span class="w"> </span><span class="k">catch</span><span class="w"> </span><span class="p">(</span><span class="n">e</span><span class="p">:</span><span class="w"> </span><span class="n">Exception</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">mine</span><span class="p">.</span><span class="na">completeExceptionally</span><span class="p">(</span><span class="n">e</span><span class="p">)</span>
+<span class="w">        </span><span class="k">throw</span><span class="w"> </span><span class="n">e</span>
+<span class="w">    </span><span class="p">}</span><span class="w"> </span><span class="k">finally</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">loading</span><span class="p">.</span><span class="na">remove</span><span class="p">(</span><span class="n">couponEventId</span><span class="p">,</span><span class="w"> </span><span class="n">mine</span><span class="p">)</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+
+<span class="cm">/** 다른 요청이 읽은 결과를 기다린다. 그 요청이 실패했다면(없는 이벤트 등) 같은 예외를 던진다 */</span>
+<span class="kd">private</span><span class="w"> </span><span class="kd">fun</span><span class="w"> </span><span class="nf">awaitLoad</span><span class="p">(</span><span class="n">inFlight</span><span class="p">:</span><span class="w"> </span><span class="n">CompletableFuture</span><span class="o">&lt;</span><span class="n">StartedCouponEvent</span><span class="o">&gt;</span><span class="p">):</span><span class="w"> </span><span class="n">StartedCouponEvent</span><span class="w"> </span><span class="o">=</span>
+<span class="w">    </span><span class="k">try</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">inFlight</span><span class="p">.</span><span class="na">join</span><span class="p">()</span>
+<span class="w">    </span><span class="p">}</span><span class="w"> </span><span class="k">catch</span><span class="w"> </span><span class="p">(</span><span class="n">e</span><span class="p">:</span><span class="w"> </span><span class="n">CompletionException</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="k">throw</span><span class="w"> </span><span class="n">e</span><span class="p">.</span><span class="na">cause</span><span class="w"> </span><span class="o">?:</span><span class="w"> </span><span class="n">e</span>
+<span class="w">    </span><span class="p">}</span>
+</code></pre></div>
+</figure>
+<p>같은 이벤트를 처음 읽는 요청이 여럿이면, 맨 앞 요청만 DB 를 읽고 나머지는 그 <code>CompletableFuture</code> 를 기다립니다. 5절의 사고 3 에서 왜 필요했는지 봅니다.</p>
+<h2 id="4-왜-둘-다-필요한가">4. 왜 둘 다 필요한가 <a class="header-anchor" href="#4-왜-둘-다-필요한가">#</a></h2>
+<p>가상 스레드와 동시 실행 제한을 하나씩만 켜면 줄이 다른 곳으로 옮겨 갈 뿐입니다. 같은 앱(jar)을 설정만 바꿔 띄우고, 1,000장에 2,000~5,000명이 몰리는 동안 목록 조회를 초당 50번 불렀습니다.</p>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>목록 조회 p95</th>
+<th>플랫폼 스레드</th>
+<th>가상 스레드</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>제한 없음</strong></td>
+<td>1.9~17.0초 (M4)</td>
+<td>2.7~3.8초 · DB 커넥션 대기 631~1,079</td>
+</tr>
+<tr>
+<td><strong>발급 5개로 제한</strong></td>
+<td>3.2~5.4초 · Tomcat 스레드에서 막힘</td>
+<td><strong>11ms~1.45초</strong></td>
+</tr>
+</tbody>
+</table></div>
+<ul>
+<li>가상 스레드만: 스레드 줄은 사라졌지만, 수천 개 요청이 한꺼번에 커넥션 풀로 가서 <strong>커넥션 줄</strong>이 길어집니다.</li>
+<li>제한만: 커넥션은 지켰지만, 자리를 기다리는 발급 요청이 Tomcat 스레드 200개를 차지해서 <strong>스레드 줄</strong>에 목록 조회가 섭니다.</li>
+<li>둘 다: 발급 요청은 가상 스레드로 메모리에서 기다리고, 커넥션은 5개만 씁니다. 목록 조회는 남은 커넥션과 새 가상 스레드로 바로 처리됩니다.</li>
+</ul>
+<h2 id="5-사고-기록--부하-테스트가-찾아-준-것들">5. 사고 기록 — 부하 테스트가 찾아 준 것들 <a class="header-anchor" href="#5-사고-기록--부하-테스트가-찾아-준-것들">#</a></h2>
+<h3 id="사고-1-테스트가-갑자기-몇-배-느려졌다">사고 1. 테스트가 갑자기 몇 배 느려졌다 <a class="header-anchor" href="#사고-1-테스트가-갑자기-몇-배-느려졌다">#</a></h3>
+<p>가상 스레드를 켜자 동시성 테스트가 몇 배 느려졌습니다(원자적 UPDATE 443ms → 9.8초). 가상 스레드 탓처럼 보였지만, 설정만 바꿔 번갈아 돌리니 <strong>기계 부하 평균이 60</strong>(10코어)이었던 시간에만 느렸습니다. 부하가 내려간 뒤에는 켠 채로도 평소와 같았습니다.</p>
+<blockquote>
+<p>측정 전에는 <code>uptime</code> 으로 부하부터 봅니다. &quot;바꾼 것&quot;과 &quot;바뀐 결과&quot; 사이에 다른 원인이 끼어 있을 수 있습니다.</p>
+</blockquote>
+<h3 id="사고-2-앱이-멈췄다--고정pinning-교착">사고 2. 앱이 멈췄다 — 고정(pinning) 교착 <a class="header-anchor" href="#사고-2-앱이-멈췄다--고정pinning-교착">#</a></h3>
+<p>가상 스레드를 켠 앱에 2,000명을 몰았더니 요청을 <strong>1초에 1건</strong>만 처리했고, 종료 신호를 보내도 7분 넘게 내려가지 않았습니다.</p>
+<p>일반 <code>jstack</code> 은 가상 스레드를 보여 주지 않습니다. 가상 스레드까지 덤프하려면 이렇게 합니다.</p>
+<figure class="code-block"><figcaption><span class="code-lang">Shell</span><button type="button" class="copy-button" aria-label="코드 복사">복사</button></figcaption><div class="highlight"><pre><span></span><code>jcmd<span class="w"> </span>&lt;pid&gt;<span class="w"> </span>Thread.dump_to_file<span class="w"> </span>-format<span class="o">=</span>text<span class="w"> </span>dump.txt
+</code></pre></div>
+</figure>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>덤프에서 본 것</th>
+<th>뜻</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>가상 스레드 9개가 Tomcat <code>ConnectionHandler.unregister</code> 의 <code>synchronized (this)</code> 앞에서 대기</td>
+<td><code>synchronized</code> 에서 기다리는 가상 스레드는 캐리어를 놓지 못한다 (JDK 21)</td>
+</tr>
+<tr>
+<td>캐리어(코어 수 10개)가 이렇게 묶임</td>
+<td>다른 가상 스레드를 돌릴 운영체제 스레드가 없다</td>
+</tr>
+<tr>
+<td>가상 스레드 1,003개가 아무 프레임 없이 대기</td>
+<td>캐리어를 못 얻어 시작도 못 한 요청들</td>
+</tr>
+<tr>
+<td>종료 훅이 로그 출력 락을 기다림. 락의 주인은 <code>jstack</code> 에 안 보임</td>
+<td>락을 쥔 가상 스레드도 캐리어를 못 얻어 멈췄다</td>
+</tr>
+</tbody>
+</table></div>
+<p>그 <code>synchronized</code> 블록은 Tomcat 이 연결마다 <strong>MBean 을 등록·해제</strong>하는 코드였고, <code>server.tomcat.mbeanregistry.enabled=true</code> 일 때만 실행됩니다. M3 에서 Tomcat 스레드 지표를 보려고 켠 설정입니다. 플랫폼 스레드에서는 잠깐 줄을 서고 끝나던 코드가, 가상 스레드에서는 캐리어를 묶어 앱 전체를 멈춥니다.</p>
+<p><a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/main/resources/application.properties#L20-L22" target="_blank" rel="noopener">application.properties</a></p>
+<figure class="code-block"><figcaption><span class="code-lang">properties</span><button type="button" class="copy-button" aria-label="코드 복사">복사</button></figcaption><div class="highlight"><pre><span></span><code><span class="c1"># Tomcat MBean 등록은 끈다 (기본값). 켜면 연결마다 MBean 을 등록·해제하는데, 그 코드가 synchronized 안에서 JMX 서버를 기다려</span>
+<span class="c1"># 가상 스레드가 운영체제 스레드에 고정(pinning)된다. 가상 스레드에서는 Tomcat 스레드 풀 지표도 의미가 없어서,</span>
+<span class="c1"># 요청이 얼마나 몰렸는지는 처리 중인 요청 수(http_server_requests_active_seconds_gcount)로 본다.</span>
+</code></pre></div>
+</figure>
+<p>설정을 끄자 같은 부하에서 고정이 0건이 되었습니다. <code>-Djdk.tracePinnedThreads=short</code> 로 띄우면 고정이 일어날 때마다 로그에 스택이 남습니다. 가상 스레드를 켜기 전에 이 옵션으로 부하 테스트를 한 번 돌려 보세요.</p>
+<h3 id="사고-3-대기열이-db-커넥션을-1416개-기다렸다">사고 3. 대기열이 DB 커넥션을 1,416개 기다렸다 <a class="header-anchor" href="#사고-3-대기열이-db-커넥션을-1416개-기다렸다">#</a></h3>
+<p>대기열 줄 서기는 Redis 만 씁니다. 그런데 가상 스레드를 켠 실험에서 <strong>DB 커넥션 대기가 1,416</strong> 까지 쌓이고, 결과까지 시간이 몇 배로 늘었습니다.</p>
+<p>원인은 캐시 첫 로드였습니다. 오픈 순간 캐시가 비어 있으면 동시에 들어온 요청이 각자 DB 를 읽습니다. 플랫폼 스레드일 때는 스레드 200개가 그 수를 묶어 줬는데, 가상 스레드에서는 <strong>수천 개가 한꺼번에</strong> 읽으러 갔습니다. 그 줄 뒤에서 대기열 워커도 커넥션을 기다렸습니다.</p>
+<p>single-flight 로 고친 뒤, 같은 실험의 커넥션 대기는 0 이 되었습니다.</p>
+<p><code>ConcurrentHashMap.computeIfAbsent</code> 를 쓰면 더 짧게 쓸 수 있지만, 계산하는 동안 같은 칸의 다른 스레드를 <code>synchronized</code> 로 막습니다. 사고 2와 같은 종류의 고정입니다. <code>CompletableFuture.join()</code> 은 일반 park 라서 캐리어를 놓습니다.</p>
+<blockquote>
+<p>스레드 수 제한은 성능의 적이기만 한 것이 아니었습니다. <strong>몰래 입장 제어(admission control)를 해 주고 있었습니다.</strong> 그 제한을 풀면, 그동안 가려져 있던 약한 곳이 먼저 무너집니다.</p>
+</blockquote>
+<h3 id="사고-4-쿠폰이-남았는데-503-이-났다">사고 4. 쿠폰이 남았는데 503 이 났다 <a class="header-anchor" href="#사고-4-쿠폰이-남았는데-503-이-났다">#</a></h3>
+<p>동시 실행 제한의 대기 한도를 처음에는 5초로 잡았습니다. 1,000장에 5,000명을 몰았더니 503 이 대량으로 났습니다.</p>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>원인</th>
+<th>고친 방법</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>줄을 서 있는 사이에 소진돼도, 자리를 얻은 뒤 DB 에 가서야 소진을 알았다. 소진 뒤 줄이 천천히 빠졌다</td>
+<td>자리를 얻은 직후 메모리 캐시로 <strong>다시 확인</strong> (소진 뒤 503: 444명 → 0명)</td>
+</tr>
+<tr>
+<td>공정 모드라 줄 선 순서대로 발급되는데, 느린 환경에서는 1,000장을 다 주는 데 5초가 넘게 걸렸다</td>
+<td>대기 한도를 <strong>30초</strong>로. 제한을 넣기 전에도 DB 커넥션을 최대 30초(HikariCP 기본값) 기다렸다</td>
+</tr>
+</tbody>
+</table></div>
+<p>플랫폼 스레드일 때는 넘친 요청이 Tomcat 바깥(접속 대기열)에서 기다려서 이 한도에 걸리지 않았습니다. 가상 스레드에서는 모든 요청이 앱 안으로 들어와 이 줄에 섭니다. 여기서도 &quot;줄이 어디에 서는가&quot;가 바뀌었습니다.</p>
+<h2 id="6-그래서-빨라졌나">6. 그래서 빨라졌나 <a class="header-anchor" href="#6-그래서-빨라졌나">#</a></h2>
+<p>솔직하게 말하면, <strong>이 실험 환경에서는 발급 속도와 대기열 처리 속도를 판단할 수 없었습니다.</strong>
+k6(가상 사용자 최대 5,000명)·앱·MySQL·Redis 가 노트북 한 대의 CPU 와 메모리를 나눠 썼고, 같은 M4 를 두 번 재도 즉시 발급 응답이 3.6초와 13.0초로 갈렸습니다. 기계 부하 평균은 측정 중에 5에서 106 사이를 오갔습니다.</p>
+<p>이 정도로 흔들리는 환경에서도 결론이 같은 방향으로 나온 것만 믿을 수 있습니다.</p>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>확실한 것</th>
+<th>근거</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>다른 API 를 지키려면 가상 스레드 + 동시 실행 제한이 함께 필요하다</td>
+<td>모든 회차에서 목록 조회 p95: 둘 다일 때 11ms~1.45초, 하나만이거나 없을 때 1.9~17초</td>
+</tr>
+<tr>
+<td>고정 교착은 MBean 등록을 끄면 사라진다</td>
+<td>끈 뒤 모든 회차에서 고정 0건</td>
+</tr>
+<tr>
+<td>single-flight 가 커넥션 몰림을 없앤다</td>
+<td>대기열 실험 커넥션 대기 1,416 → 0</td>
+</tr>
+</tbody>
+</table></div>
+<p>반대로, 가상 스레드가 <strong>발급 자체를 빠르게 하지는 않았습니다.</strong> CPU 가 병목인 상황에서는 동시에 도는 요청이 늘수록 각자의 몫이 줄어듭니다. 가상 스레드는 &quot;기다리는 비용&quot;을 줄여 줄 뿐, CPU 를 늘려 주지 않습니다.</p>
+<h2 id="흔한-실수">흔한 실수 <a class="header-anchor" href="#흔한-실수">#</a></h2>
+<ul>
+<li><strong>가상 스레드를 켜면 빨라진다고 기대한다.</strong> 기다림이 많은 I/O 위주 서비스에서 동시 처리량이 늘 뿐입니다. CPU 가 바쁘면 효과가 없거나 나빠집니다.</li>
+<li><strong><code>synchronized</code> 를 신경 쓰지 않는다.</strong> JDK 21 에서는 <code>synchronized</code> 안에서 기다리는 코드 하나가 캐리어를 묶습니다. 라이브러리 안에 있어도 마찬가지입니다(이번에는 Tomcat).</li>
+<li><strong>스레드 풀이 해 주던 일을 잊는다.</strong> 스레드 200개 제한은 DB 커넥션 앞의 줄 길이도 묶어 주고 있었습니다. 제한을 풀면 그 줄을 다른 곳(격벽)에서 직접 관리해야 합니다.</li>
+<li><strong>대기 한도를 감으로 정한다.</strong> 줄 선 순서대로 처리되는 곳에서 한도가 짧으면, 받을 수 있었던 사람이 503 을 받습니다.</li>
+<li><strong>흔들리는 환경에서 한 번 재고 결론 낸다.</strong> 같은 것을 두 번 재서 얼마나 흔들리는지부터 봅니다.</li>
+</ul>
+<h2 id="직접-해보기">직접 해보기 <a class="header-anchor" href="#직접-해보기">#</a></h2>
+<ol>
+<li><code>CouponIssueBulkhead</code> 를 비공정 모드(<code>Semaphore(5, false)</code>)로 바꾸면 무엇이 달라질까요? 선착순 서비스에서 어떤 불만이 나올지 생각해 보세요.</li>
+<li><code>StartedCouponEventCache.loadOnce</code> 를 <code>computeIfAbsent</code> 로 바꾸고, 가상 스레드를 켠 상태에서 <code>-Djdk.tracePinnedThreads=short</code> 로 부하 테스트를 돌려 보세요. 로그에 무엇이 남나요?</li>
+<li>서버를 3대로 늘리면 동시 실행 제한 5개는 DB 전체로 몇 개가 되나요? 커넥션 풀 크기와 함께 어떻게 정해야 할까요?</li>
+<li><code>-Djdk.tracePinnedThreads=short</code> 를 켜고 앱을 띄운 뒤, 일부러 <code>server.tomcat.mbeanregistry.enabled=true</code> 로 몰림을 만들어 보세요. 덤프(<code>jcmd ... Thread.dump_to_file</code>)에서 캐리어가 묶이는 모습을 찾아보세요. (로컬에서만!)</li>
+</ol>
+<p><strong>힌트</strong></p>
+<ol>
+<li>막 도착한 요청이 자리를 가로챌 수 있어서, 먼저 줄 선 사람보다 늦게 온 사람이 먼저 발급받을 수 있습니다. 처리량은 조금 늘 수 있습니다.</li>
+<li><code>ConcurrentHashMap.computeIfAbsent</code> → <code>synchronized</code> 에서 기다리는 가상 스레드의 스택이 찍힙니다. 첫 로드가 느릴수록 많이 찍힙니다.</li>
+<li>3 × 5 = 15 개. DB 의 <code>max_connections</code> 와 서버마다의 풀 크기(10)를 넘지 않게, 그리고 다른 API 몫이 남게 정합니다.</li>
+<li>9개 안팎의 가상 스레드가 <code>ConnectionHandler.unregister</code> 에 멈춰 있고, 수많은 가상 스레드가 프레임 없이 대기합니다.</li>
+</ol>
+<h2 id="다음으로">다음으로 <a class="header-anchor" href="#다음으로">#</a></h2>
+<p><a href="index.html">README</a> 로 돌아가 다른 장을 다시 보거나, <a href="https://github.com/RosieOh/Kopring_Core/blob/main/load-test/README.md" target="_blank" rel="noopener">load-test/README.md</a> 에서 M5 측정 표 전체를 보세요.</p>
+
+</article>
+<p class="source-link"><a href="https://github.com/RosieOh/Kopring_Core/blob/main/docs/13-virtual-threads-and-backpressure.md" target="_blank" rel="noopener">이 장의 원본 Markdown 보기</a></p>
+<nav class="pager" aria-label="장 이동"><a class="pager-prev" href="12-next-steps-and-exercises.html"><span>이전</span>12장. 다음 공부와 연습 문제</a></nav>
+</main>
+<nav class="page-toc" aria-label="이 장의 목차"><p class="page-toc-title">이 장에서</p><ol><li class="toc-level-2"><a href="#1-문제--몰림이-다른-기능까지-느리게-한다">1. 문제 — 몰림이 다른 기능까지 느리게 한다</a></li>
+<li class="toc-level-2"><a href="#2-개념">2. 개념</a></li>
+<li class="toc-level-3"><a href="#가상-스레드-java-21">가상 스레드 (Java 21)</a></li>
+<li class="toc-level-3"><a href="#격벽bulkhead">격벽(bulkhead)</a></li>
+<li class="toc-level-2"><a href="#3-프로젝트-코드로-보기">3. 프로젝트 코드로 보기</a></li>
+<li class="toc-level-3"><a href="#가상-스레드-켜기">가상 스레드 켜기</a></li>
+<li class="toc-level-3"><a href="#함정-1--스케줄러가-스레드-하나로-줄어든다">함정 1 — 스케줄러가 스레드 하나로 줄어든다</a></li>
+<li class="toc-level-3"><a href="#발급-동시-실행-제한">발급 동시 실행 제한</a></li>
+<li class="toc-level-3"><a href="#캐시-첫-로드--single-flight">캐시 첫 로드 — single-flight</a></li>
+<li class="toc-level-2"><a href="#4-왜-둘-다-필요한가">4. 왜 둘 다 필요한가</a></li>
+<li class="toc-level-2"><a href="#5-사고-기록--부하-테스트가-찾아-준-것들">5. 사고 기록 — 부하 테스트가 찾아 준 것들</a></li>
+<li class="toc-level-3"><a href="#사고-1-테스트가-갑자기-몇-배-느려졌다">사고 1. 테스트가 갑자기 몇 배 느려졌다</a></li>
+<li class="toc-level-3"><a href="#사고-2-앱이-멈췄다--고정pinning-교착">사고 2. 앱이 멈췄다 — 고정(pinning) 교착</a></li>
+<li class="toc-level-3"><a href="#사고-3-대기열이-db-커넥션을-1416개-기다렸다">사고 3. 대기열이 DB 커넥션을 1,416개 기다렸다</a></li>
+<li class="toc-level-3"><a href="#사고-4-쿠폰이-남았는데-503-이-났다">사고 4. 쿠폰이 남았는데 503 이 났다</a></li>
+<li class="toc-level-2"><a href="#6-그래서-빨라졌나">6. 그래서 빨라졌나</a></li>
+<li class="toc-level-2"><a href="#흔한-실수">흔한 실수</a></li>
+<li class="toc-level-2"><a href="#직접-해보기">직접 해보기</a></li>
+<li class="toc-level-2"><a href="#다음으로">다음으로</a></li></ol></nav>
+</div>
+</body>
+</html>

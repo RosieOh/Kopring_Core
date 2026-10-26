@@ -1,0 +1,464 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>11장. 관측과 부하 테스트 — 코프링 교재</title>
+<meta name="description" content="선착순 쿠폰 코드로 배우는 Kotlin + Spring Boot">
+<script>try{var t=localStorage.getItem("book-theme");if(t)document.documentElement.dataset.theme=t;}catch(e){}</script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+<link rel="stylesheet" href="assets/book.css">
+<link rel="stylesheet" href="assets/highlight.css">
+<script src="assets/book.js" defer></script>
+</head>
+<body>
+<a class="skip-link" href="#content">본문으로 건너뛰기</a>
+<header class="topbar">
+  <button type="button" class="menu-button" aria-label="장 목록 열기" aria-expanded="false" aria-controls="sidebar">목차</button>
+  <a class="topbar-title" href="index.html">코프링 교재</a>
+  <button type="button" class="theme-button" aria-label="밝은 화면과 어두운 화면 바꾸기">화면</button>
+</header>
+<div class="layout">
+<aside class="sidebar" id="sidebar">
+  <a class="sidebar-title" href="index.html">코프링 교재<small>선착순 쿠폰으로 배우는 Kotlin + Spring Boot</small></a>
+  <nav aria-label="장 목록"><ol class="chapter-list">
+<li><a href="index.html">처음에 — 읽는 법과 목차</a></li>
+<li><a href="01-kotlin-basics.html">1장. Kotlin 기초</a></li>
+<li><a href="02-spring-meets-kotlin.html">2장. 스프링이 Kotlin 을 만나면</a></li>
+<li><a href="03-architecture.html">3장. 프로젝트 구조와 계층</a></li>
+<li><a href="04-jpa-with-kotlin.html">4장. JPA 엔티티를 Kotlin 으로</a></li>
+<li><a href="05-web-and-errors.html">5장. 웹 계층과 예외 처리</a></li>
+<li><a href="06-auth.html">6장. 인증</a></li>
+<li><a href="07-concurrency.html">7장. 동시성 제어</a></li>
+<li><a href="08-async-and-reliability.html">8장. 비동기와 신뢰성</a></li>
+<li><a href="09-redis-queue.html">9장. Redis 대기열</a></li>
+<li><a href="10-testing.html">10장. 테스트</a></li>
+<li><a href="11-observability-and-load-test.html" aria-current="page">11장. 관측과 부하 테스트</a></li>
+<li><a href="12-next-steps-and-exercises.html">12장. 다음 공부와 연습 문제</a></li>
+<li><a href="13-virtual-threads-and-backpressure.html">13장. 심화: 가상 스레드와 몰림 대응</a></li>
+  </ol></nav>
+</aside>
+<main id="content" class="content">
+<article class="markdown">
+<h1 id="11장-관측과-부하-테스트--빨라졌다를-숫자로">11장. 관측과 부하 테스트 — &quot;빨라졌다&quot;를 숫자로 <a class="header-anchor" href="#11장-관측과-부하-테스트--빨라졌다를-숫자로">#</a></h1>
+<p><strong>한 줄 요약</strong>: 코드에서 지표를 남기고(Micrometer), 1초마다 모으고(Prometheus), 그래프로 봅니다(Grafana). k6 로 오픈 순간을 재현해 같은 조건에서 방식끼리 비교하고, 숫자가 <strong>왜</strong> 그렇게 나왔는지 서버 지표로 설명합니다.</p>
+<h2 id="1-왜-지표가-필요한가">1. 왜 지표가 필요한가 <a class="header-anchor" href="#1-왜-지표가-필요한가">#</a></h2>
+<p>&quot;분산락보다 원자적 UPDATE 가 빠르다&quot;는 말만으로는 부족합니다. 얼마나? 어떤 조건에서? 대가는? <a href="07-concurrency.html">7장</a>의 결론 &quot;원자적 UPDATE 가 2.4~2.6배 빠르지만 DB 커넥션 대기가 110까지 쌓인다&quot;는 두 종류의 숫자가 있어야 나옵니다.</p>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>숫자</th>
+<th>어디서</th>
+<th>예</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>사용자가 느낀 것</td>
+<td>k6 (부하 도구)</td>
+<td>응답 중앙값, p95, 실패 수</td>
+</tr>
+<tr>
+<td>서버 안에서 일어난 것</td>
+<td>Micrometer → Prometheus</td>
+<td>DB 커넥션 대기, Tomcat 스레드, 락 대기 시간</td>
+</tr>
+</tbody>
+</table></div>
+<p>앞의 것만 있으면 &quot;느려졌다&quot;까지만 알고, 뒤의 것이 있어야 &quot;<strong>왜</strong> 느려졌나&quot;를 압니다.</p>
+<h2 id="2-micrometer--지표를-남기는-코드">2. Micrometer — 지표를 남기는 코드 <a class="header-anchor" href="#2-micrometer--지표를-남기는-코드">#</a></h2>
+<p>Micrometer 는 지표용 파사드입니다. 로그의 SLF4J 처럼, 코드는 Micrometer 에만 의존하고 실제 저장소(Prometheus 등)는 의존성으로 고릅니다. 이 프로젝트는 <code>micrometer-registry-prometheus</code> 를 씁니다.</p>
+<h3 id="카운터--몇-번-일어났나">카운터 — 몇 번 일어났나 <a class="header-anchor" href="#카운터--몇-번-일어났나">#</a></h3>
+<p><a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/main/kotlin/com/site/domain/coupon/service/CouponIssueMetrics.kt#L8-L31" target="_blank" rel="noopener">CouponIssueMetrics.kt</a></p>
+<figure class="code-block"><figcaption><span class="code-lang">Kotlin</span><button type="button" class="copy-button" aria-label="코드 복사">복사</button></figcaption><div class="highlight"><pre><span></span><code><span class="cm">/**</span>
+<span class="cm"> * 발급 요청 결과를 센다. Prometheus 에서는 coupon_issue_requests_total{mode, result} 로 보인다.</span>
+<span class="cm"> *</span>
+<span class="cm"> * Micrometer 는 지표용 파사드(로깅의 SLF4J 같은 것)라서 domain 에서 직접 써도 특정 모니터링 시스템에 묶이지 않는다.</span>
+<span class="cm"> * result 태그 값은 enum 이름이라 종류가 정해져 있다. (태그 값 종류가 무한히 늘면 Prometheus 메모리가 터진다)</span>
+<span class="cm"> */</span>
+<span class="nd">@Component</span>
+<span class="kd">class</span><span class="w"> </span><span class="nc">CouponIssueMetrics</span><span class="p">(</span>
+<span class="w">    </span><span class="kd">private</span><span class="w"> </span><span class="kd">val</span><span class="w"> </span><span class="nv">meterRegistry</span><span class="p">:</span><span class="w"> </span><span class="n">MeterRegistry</span><span class="p">,</span>
+<span class="p">)</span><span class="w"> </span><span class="p">{</span>
+
+<span class="w">    </span><span class="kd">fun</span><span class="w"> </span><span class="nf">recordDirectIssued</span><span class="p">()</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">record</span><span class="p">(</span><span class="n">mode</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">"direct"</span><span class="p">,</span><span class="w"> </span><span class="n">result</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">"issued"</span><span class="p">)</span>
+
+<span class="w">    </span><span class="kd">fun</span><span class="w"> </span><span class="nf">recordDirectFailed</span><span class="p">(</span><span class="n">errorCode</span><span class="p">:</span><span class="w"> </span><span class="n">ErrorCode</span><span class="p">)</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">record</span><span class="p">(</span><span class="n">mode</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">"direct"</span><span class="p">,</span><span class="w"> </span><span class="n">result</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">resultOf</span><span class="p">(</span><span class="n">errorCode</span><span class="p">))</span>
+
+<span class="w">    </span><span class="kd">fun</span><span class="w"> </span><span class="nf">recordQueue</span><span class="p">(</span><span class="n">result</span><span class="p">:</span><span class="w"> </span><span class="n">CouponQueueResult</span><span class="p">,</span><span class="w"> </span><span class="n">count</span><span class="p">:</span><span class="w"> </span><span class="kt">Long</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="m">1</span><span class="p">)</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">record</span><span class="p">(</span><span class="n">mode</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">"queue"</span><span class="p">,</span><span class="w"> </span><span class="n">result</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">result</span><span class="p">.</span><span class="na">name</span><span class="p">.</span><span class="na">lowercase</span><span class="p">(),</span><span class="w"> </span><span class="n">count</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">count</span><span class="p">)</span>
+
+<span class="w">    </span><span class="kd">private</span><span class="w"> </span><span class="kd">fun</span><span class="w"> </span><span class="nf">record</span><span class="p">(</span>
+<span class="w">        </span><span class="n">mode</span><span class="p">:</span><span class="w"> </span><span class="kt">String</span><span class="p">,</span>
+<span class="w">        </span><span class="n">result</span><span class="p">:</span><span class="w"> </span><span class="kt">String</span><span class="p">,</span>
+<span class="w">        </span><span class="n">count</span><span class="p">:</span><span class="w"> </span><span class="kt">Long</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="m">1</span><span class="p">,</span>
+<span class="w">    </span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">meterRegistry</span><span class="p">.</span><span class="na">counter</span><span class="p">(</span><span class="n">NAME</span><span class="p">,</span><span class="w"> </span><span class="s">"mode"</span><span class="p">,</span><span class="w"> </span><span class="n">mode</span><span class="p">,</span><span class="w"> </span><span class="s">"result"</span><span class="p">,</span><span class="w"> </span><span class="n">result</span><span class="p">).</span><span class="na">increment</span><span class="p">(</span><span class="n">count</span><span class="p">.</span><span class="na">toDouble</span><span class="p">())</span>
+<span class="w">    </span><span class="p">}</span>
+</code></pre></div>
+</figure>
+<p><strong>태그(라벨)</strong> 로 같은 지표를 나눠 셉니다. <code>coupon_issue_requests_total{mode=&quot;direct&quot;, result=&quot;sold_out&quot;}</code> 처럼요.</p>
+<p>태그에서 가장 중요한 규칙은 <strong>값의 종류가 정해져 있어야 한다</strong>는 것입니다(카디널리티). 태그 조합마다 Prometheus 가 시계열 하나를 따로 저장합니다. <code>memberId</code> 를 태그에 넣으면 회원 수만큼 시계열이 생겨 메모리가 터집니다. 여기서는 결과를 enum 이름으로만 씁니다.</p>
+<p>즉시 발급과 대기열의 결과 이름을 같게(<code>sold_out</code>, <code>issued</code> ...) 맞춘 것도 의도입니다. 두 방식을 대시보드에서 나란히 비교할 수 있습니다.</p>
+<h3 id="타이머--히스토그램--얼마나-걸렸나">타이머 + 히스토그램 — 얼마나 걸렸나 <a class="header-anchor" href="#타이머--히스토그램--얼마나-걸렸나">#</a></h3>
+<p><a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/main/kotlin/com/site/infrastructure/redis/lock/DistributedLockAspect.kt#L64-L80" target="_blank" rel="noopener">DistributedLockAspect.kt</a></p>
+<figure class="code-block"><figcaption><span class="code-lang">Kotlin</span><button type="button" class="copy-button" aria-label="코드 복사">복사</button></figcaption><div class="highlight"><pre><span></span><code><span class="cm">/**</span>
+<span class="cm"> * 락을 얻기까지 기다린 시간. Prometheus 에서는 lock_wait_seconds_bucket{lock, result} 로 보인다.</span>
+<span class="cm"> * 태그에는 락 이름 전체(이벤트 ID 포함)가 아니라 종류만 넣는다. ('coupon-event:' + #id → coupon-event)</span>
+<span class="cm"> */</span>
+<span class="kd">private</span><span class="w"> </span><span class="kd">fun</span><span class="w"> </span><span class="nf">recordWait</span><span class="p">(</span>
+<span class="w">    </span><span class="n">key</span><span class="p">:</span><span class="w"> </span><span class="kt">String</span><span class="p">,</span>
+<span class="w">    </span><span class="n">acquired</span><span class="p">:</span><span class="w"> </span><span class="kt">Boolean</span><span class="p">,</span>
+<span class="w">    </span><span class="n">nanos</span><span class="p">:</span><span class="w"> </span><span class="kt">Long</span><span class="p">,</span>
+<span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">Timer</span><span class="p">.</span><span class="na">builder</span><span class="p">(</span><span class="s">"lock.wait"</span><span class="p">)</span>
+<span class="w">        </span><span class="p">.</span><span class="na">description</span><span class="p">(</span><span class="s">"분산락을 얻기까지 기다린 시간"</span><span class="p">)</span>
+<span class="w">        </span><span class="p">.</span><span class="na">tag</span><span class="p">(</span><span class="s">"lock"</span><span class="p">,</span><span class="w"> </span><span class="n">key</span><span class="p">.</span><span class="na">substringAfter</span><span class="p">(</span><span class="s">"'"</span><span class="p">).</span><span class="na">substringBefore</span><span class="p">(</span><span class="s">":"</span><span class="p">))</span>
+<span class="w">        </span><span class="p">.</span><span class="na">tag</span><span class="p">(</span><span class="s">"result"</span><span class="p">,</span><span class="w"> </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">acquired</span><span class="p">)</span><span class="w"> </span><span class="s">"acquired"</span><span class="w"> </span><span class="k">else</span><span class="w"> </span><span class="s">"timeout"</span><span class="p">)</span>
+<span class="w">        </span><span class="p">.</span><span class="na">publishPercentileHistogram</span><span class="p">()</span>
+<span class="w">        </span><span class="p">.</span><span class="na">register</span><span class="p">(</span><span class="n">meterRegistry</span><span class="p">)</span>
+<span class="w">        </span><span class="p">.</span><span class="na">record</span><span class="p">(</span><span class="n">nanos</span><span class="p">,</span><span class="w"> </span><span class="n">TimeUnit</span><span class="p">.</span><span class="na">NANOSECONDS</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></div>
+</figure>
+<ul>
+<li>락 이름 전체(<code>coupon-event:7</code>)가 아니라 <strong>종류</strong>(<code>coupon-event</code>)만 태그에 넣습니다. 이벤트 ID 를 넣으면 이벤트 수만큼 시계열이 생깁니다.</li>
+<li><code>publishPercentileHistogram()</code>: 시간을 구간(bucket)별로 세어 내보냅니다. Prometheus 가 여러 서버의 값을 합쳐 p95 를 계산할 수 있습니다. 서버 안에서 p95 를 계산해 내보내면 서버끼리 합칠 수 없습니다.</li>
+</ul>
+<h3 id="게이지--지금-몇-개인가">게이지 — 지금 몇 개인가 <a class="header-anchor" href="#게이지--지금-몇-개인가">#</a></h3>
+<p><a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/main/kotlin/com/site/domain/notification/service/NotificationOutboxMetrics.kt#L20-L26" target="_blank" rel="noopener">NotificationOutboxMetrics.kt</a></p>
+<figure class="code-block"><figcaption><span class="code-lang">Kotlin</span><button type="button" class="copy-button" aria-label="코드 복사">복사</button></figcaption><div class="highlight"><pre><span></span><code><span class="k">init</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="c1">// 게이지 값은 Prometheus 가 가져갈 때(scrape)마다 계산된다. (status, next_attempt_at) 인덱스를 타는 count 쿼리다.</span>
+<span class="w">    </span><span class="n">Gauge</span><span class="p">.</span><span class="na">builder</span><span class="p">(</span><span class="s">"notification.outbox.pending"</span><span class="p">,</span><span class="w"> </span><span class="n">outboxRepository</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nb">it</span><span class="p">.</span><span class="na">countByStatus</span><span class="p">(</span><span class="n">OutboxStatus</span><span class="p">.</span><span class="na">PENDING</span><span class="p">).</span><span class="na">toDouble</span><span class="p">()</span><span class="w"> </span><span class="p">}</span>
+<span class="w">        </span><span class="p">.</span><span class="na">description</span><span class="p">(</span><span class="s">"아직 보내지 못한 알림 수"</span><span class="p">)</span>
+<span class="w">        </span><span class="p">.</span><span class="na">strongReference</span><span class="p">(</span><span class="kc">true</span><span class="p">)</span>
+<span class="w">        </span><span class="p">.</span><span class="na">register</span><span class="p">(</span><span class="n">meterRegistry</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></div>
+</figure>
+<p>카운터는 계속 늘기만 하고, 게이지는 오르내리는 현재 값입니다. &quot;아직 못 보낸 알림&quot;이 계속 늘면 발송이 막힌 것입니다.</p>
+<p>대기열 크기처럼 <strong>대상이 그때그때 바뀌는</strong> 게이지는 <code>MultiGauge</code> 로 행 전체를 덮어씁니다.</p>
+<p><a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/main/kotlin/com/site/domain/coupon/queue/CouponQueueMetrics.kt#L9-L33" target="_blank" rel="noopener">CouponQueueMetrics.kt</a></p>
+<figure class="code-block"><figcaption><span class="code-lang">Kotlin</span><button type="button" class="copy-button" aria-label="코드 복사">복사</button></figcaption><div class="highlight"><pre><span></span><code><span class="cm">/**</span>
+<span class="cm"> * 이벤트별 대기열 크기. Prometheus 에서는 coupon_queue_size{event_id, state="waiting|processing"} 로 보인다.</span>
+<span class="cm"> *</span>
+<span class="cm"> * 진행 중인 이벤트는 그때그때 달라서 게이지를 미리 등록해 둘 수 없다. MultiGauge 에 "지금 있는 행"을 통째로 덮어쓰면</span>
+<span class="cm"> * 새 이벤트는 추가되고, 끝난 이벤트는 지표에서 사라진다.</span>
+<span class="cm"> */</span>
+<span class="nd">@Component</span>
+<span class="kd">class</span><span class="w"> </span><span class="nc">CouponQueueMetrics</span><span class="p">(</span>
+<span class="w">    </span><span class="n">meterRegistry</span><span class="p">:</span><span class="w"> </span><span class="n">MeterRegistry</span><span class="p">,</span>
+<span class="w">    </span><span class="kd">private</span><span class="w"> </span><span class="kd">val</span><span class="w"> </span><span class="nv">couponQueueStore</span><span class="p">:</span><span class="w"> </span><span class="n">CouponQueueStore</span><span class="p">,</span>
+<span class="p">)</span><span class="w"> </span><span class="p">{</span>
+
+<span class="w">    </span><span class="kd">private</span><span class="w"> </span><span class="kd">val</span><span class="w"> </span><span class="nv">queueSize</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">MultiGauge</span><span class="p">.</span><span class="na">builder</span><span class="p">(</span><span class="n">NAME</span><span class="p">)</span>
+<span class="w">        </span><span class="p">.</span><span class="na">description</span><span class="p">(</span><span class="s">"선착순 대기열 인원"</span><span class="p">)</span>
+<span class="w">        </span><span class="p">.</span><span class="na">register</span><span class="p">(</span><span class="n">meterRegistry</span><span class="p">)</span>
+
+<span class="w">    </span><span class="kd">fun</span><span class="w"> </span><span class="nf">refresh</span><span class="p">(</span><span class="n">activeEventIds</span><span class="p">:</span><span class="w"> </span><span class="n">Set</span><span class="o">&lt;</span><span class="kt">Long</span><span class="o">&gt;</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="kd">val</span><span class="w"> </span><span class="nv">rows</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">activeEventIds</span><span class="p">.</span><span class="na">flatMap</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">couponEventId</span><span class="w"> </span><span class="o">-&gt;</span>
+<span class="w">            </span><span class="n">listOf</span><span class="p">(</span>
+<span class="w">                </span><span class="n">row</span><span class="p">(</span><span class="n">couponEventId</span><span class="p">,</span><span class="w"> </span><span class="s">"waiting"</span><span class="p">,</span><span class="w"> </span><span class="n">couponQueueStore</span><span class="p">.</span><span class="na">waitingCount</span><span class="p">(</span><span class="n">couponEventId</span><span class="p">)),</span>
+<span class="w">                </span><span class="n">row</span><span class="p">(</span><span class="n">couponEventId</span><span class="p">,</span><span class="w"> </span><span class="s">"processing"</span><span class="p">,</span><span class="w"> </span><span class="n">couponQueueStore</span><span class="p">.</span><span class="na">processingCount</span><span class="p">(</span><span class="n">couponEventId</span><span class="p">)),</span>
+<span class="w">            </span><span class="p">)</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="w">        </span><span class="n">queueSize</span><span class="p">.</span><span class="na">register</span><span class="p">(</span><span class="n">rows</span><span class="p">,</span><span class="w"> </span><span class="kc">true</span><span class="p">)</span>
+<span class="w">    </span><span class="p">}</span>
+</code></pre></div>
+</figure>
+<p>여기는 <code>event_id</code> 를 태그로 씁니다. 동시에 진행되는 대기열 이벤트는 몇 개뿐이고, 끝난 이벤트는 지표에서 빠지므로 시계열이 무한히 늘지 않습니다. 같은 &quot;ID 태그&quot;라도 <strong>동시에 몇 개가 살아 있나</strong>로 판단합니다.</p>
+<h3 id="스프링이-알아서-주는-지표">스프링이 알아서 주는 지표 <a class="header-anchor" href="#스프링이-알아서-주는-지표">#</a></h3>
+<p><a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/main/resources/application.properties" target="_blank" rel="noopener">application.properties</a></p>
+<figure class="code-block"><figcaption><span class="code-lang">properties</span><button type="button" class="copy-button" aria-label="코드 복사">복사</button></figcaption><div class="highlight"><pre><span></span><code><span class="c1"># 지표: 모든 지표에 애플리케이션 이름 태그를 붙이고, HTTP 응답 시간은 히스토그램으로 내보내 Prometheus 에서 p95 를 계산한다</span>
+<span class="na">management.metrics.tags.application</span><span class="o">=</span><span class="s">kopring-core</span>
+<span class="na">management.metrics.distribution.percentiles-histogram.http.server.requests</span><span class="o">=</span><span class="s">true</span>
+<span class="c1"># Tomcat MBean 등록은 끈다 (기본값). 켜면 연결마다 MBean 을 등록·해제하는데, 그 코드가 synchronized 안에서 JMX 서버를 기다려</span>
+<span class="c1"># 가상 스레드가 운영체제 스레드에 고정(pinning)된다. 가상 스레드에서는 Tomcat 스레드 풀 지표도 의미가 없어서,</span>
+<span class="c1"># 요청이 얼마나 몰렸는지는 처리 중인 요청 수(http_server_requests_active_seconds_gcount)로 본다.</span>
+</code></pre></div>
+</figure>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>지표</th>
+<th>무엇을 보나</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>http_server_requests_seconds</code></td>
+<td>API 별 응답 시간</td>
+</tr>
+<tr>
+<td><code>hikaricp_connections_pending</code></td>
+<td>DB 커넥션을 기다리는 요청 수</td>
+</tr>
+<tr>
+<td><code>http_server_requests_active_seconds_gcount</code></td>
+<td>지금 처리 중인 요청 수</td>
+</tr>
+</tbody>
+</table></div>
+<p>M4 까지는 Tomcat 스레드 지표(<code>tomcat_threads_busy_threads</code>, 최대 200)를 봤습니다. 이 지표를 내려면 <code>server.tomcat.mbeanregistry.enabled=true</code> 가 필요한데, M5 에서 가상 스레드를 켜자 바로 이 설정이 <strong>앱 전체를 멈추게</strong> 했습니다. 그 이야기는 <a href="13-virtual-threads-and-backpressure.html">13장</a>에 있습니다.</p>
+<p><code>_gcount</code> 라는 이름이 붙는 이유: 위의 히스토그램 설정이 접두어(<code>http.server.requests</code>)로 <code>http.server.requests.active</code> 에도 걸려서, 처리 중인 요청을 세는 LongTaskTimer 가 &quot;게이지 히스토그램&quot;으로 나갑니다. 그 개수가 <code>_gcount</code> 입니다. 지표 이름은 추측하지 말고 <code>/actuator/prometheus</code> 출력에서 확인하세요.</p>
+<p>지표는 <code>/actuator/prometheus</code> 로 나갑니다. 로컬에서만 노출하고, 운영 프로필은 health 만 엽니다. (<a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/main/kotlin/com/site/infrastructure/security/SecurityConfig.kt" target="_blank" rel="noopener">SecurityConfig</a> 주석)</p>
+<h2 id="3-prometheus-와-grafana">3. Prometheus 와 Grafana <a class="header-anchor" href="#3-prometheus-와-grafana">#</a></h2>
+<figure class="code-block"><figcaption><span class="code-lang">Shell</span><button type="button" class="copy-button" aria-label="코드 복사">복사</button></figcaption><div class="highlight"><pre><span></span><code>docker<span class="w"> </span>compose<span class="w"> </span>--profile<span class="w"> </span>monitoring<span class="w"> </span>up<span class="w"> </span>-d
+<span class="c1"># Prometheus http://localhost:9090, Grafana http://localhost:3000</span>
+</code></pre></div>
+</figure>
+<p><a href="https://github.com/RosieOh/Kopring_Core/blob/main/monitoring/prometheus/prometheus.yml" target="_blank" rel="noopener">prometheus.yml</a></p>
+<figure class="code-block"><figcaption><span class="code-lang">YAML</span><button type="button" class="copy-button" aria-label="코드 복사">복사</button></figcaption><div class="highlight"><pre><span></span><code><span class="c1"># 로컬에서 ./gradlew bootRun 으로 띄운 앱(호스트 8080)의 지표를 1초마다 가져온다 (몇 초짜리 부하 테스트도 놓치지 않게)</span>
+<span class="nt">global</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">scrape_interval</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1s</span>
+<span class="w">  </span><span class="nt">evaluation_interval</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">1s</span>
+</code></pre></div>
+</figure>
+<p>Prometheus 는 앱에 <strong>가서 가져갑니다(pull).</strong> 흔히 15초~1분 간격으로 모으지만, 부하 테스트가 몇 초 만에 끝나서 1초로 줄였습니다.</p>
+<p>Grafana 대시보드(&quot;Kopring Core — 선착순 쿠폰&quot;)는 <a href="https://github.com/RosieOh/Kopring_Core/tree/main/monitoring/grafana" target="_blank" rel="noopener">monitoring/grafana</a> 에 파일로 들어 있어, 컨테이너를 띄우면 자동으로 만들어집니다.</p>
+<p>부하 테스트 결과를 표로 만드는 스크립트가 쓰는 PromQL 입니다.</p>
+<p><a href="https://github.com/RosieOh/Kopring_Core/blob/main/load-test/summarize.py#L18-L33" target="_blank" rel="noopener">summarize.py</a></p>
+<figure class="code-block"><figcaption><span class="code-lang">Python</span><button type="button" class="copy-button" aria-label="코드 복사">복사</button></figcaption><div class="highlight"><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">server_metrics</span><span class="p">(</span><span class="n">start</span><span class="p">:</span> <span class="nb">int</span><span class="p">,</span> <span class="n">end</span><span class="p">:</span> <span class="nb">int</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="nb">dict</span><span class="p">:</span>
+    <span class="c1"># 실행 구간 + 지표 반영 여유(3초)</span>
+    <span class="n">window</span> <span class="o">=</span> <span class="n">end</span> <span class="o">-</span> <span class="n">start</span> <span class="o">+</span> <span class="mi">3</span>
+    <span class="n">at</span> <span class="o">=</span> <span class="n">end</span> <span class="o">+</span> <span class="mi">3</span>
+    <span class="k">return</span> <span class="p">{</span>
+        <span class="s2">"db_pending_max"</span><span class="p">:</span> <span class="n">prom</span><span class="p">(</span><span class="sa">f</span><span class="s2">"max_over_time(sum(hikaricp_connections_pending</span><span class="se">{{</span><span class="si">{</span><span class="n">APP</span><span class="si">}</span><span class="se">}}</span><span class="s2">)[</span><span class="si">{</span><span class="n">window</span><span class="si">}</span><span class="s2">s:1s])"</span><span class="p">,</span> <span class="n">at</span><span class="p">),</span>
+        <span class="c1"># 가상 스레드에는 Tomcat 스레드 풀 지표가 없어서, 스레드 방식과 상관없는 "처리 중인 요청 수"로 본다</span>
+        <span class="s2">"inflight_max"</span><span class="p">:</span> <span class="n">prom</span><span class="p">(</span><span class="sa">f</span><span class="s2">"max_over_time(sum(http_server_requests_active_seconds_gcount</span><span class="se">{{</span><span class="si">{</span><span class="n">APP</span><span class="si">}</span><span class="se">}}</span><span class="s2">)[</span><span class="si">{</span><span class="n">window</span><span class="si">}</span><span class="s2">s:1s])"</span><span class="p">,</span> <span class="n">at</span><span class="p">),</span>
+        <span class="s2">"lock_wait_p95"</span><span class="p">:</span> <span class="n">prom</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">"histogram_quantile(0.95, sum by (le) (increase(lock_wait_seconds_bucket</span><span class="se">{{</span><span class="si">{</span><span class="n">APP</span><span class="si">}</span><span class="se">}}</span><span class="s2">[</span><span class="si">{</span><span class="n">window</span><span class="si">}</span><span class="s2">s])))"</span><span class="p">,</span> <span class="n">at</span>
+        <span class="p">),</span>
+        <span class="s2">"bulkhead_wait_p95"</span><span class="p">:</span> <span class="n">prom</span><span class="p">(</span>
+            <span class="sa">f</span><span class="s2">"histogram_quantile(0.95, sum by (le) (increase(coupon_issue_bulkhead_wait_seconds_bucket</span><span class="se">{{</span><span class="si">{</span><span class="n">APP</span><span class="si">}</span><span class="se">}}</span><span class="s2">[</span><span class="si">{</span><span class="n">window</span><span class="si">}</span><span class="s2">s])))"</span><span class="p">,</span> <span class="n">at</span>
+        <span class="p">),</span>
+        <span class="s2">"queue_waiting_max"</span><span class="p">:</span> <span class="n">prom</span><span class="p">(</span><span class="sa">f</span><span class="s1">'max_over_time(sum(coupon_queue_size</span><span class="se">{{</span><span class="si">{</span><span class="n">APP</span><span class="si">}</span><span class="s1">, state="waiting"</span><span class="se">}}</span><span class="s1">)[</span><span class="si">{</span><span class="n">window</span><span class="si">}</span><span class="s1">s:1s])'</span><span class="p">,</span> <span class="n">at</span><span class="p">),</span>
+    <span class="p">}</span>
+</code></pre></div>
+</figure>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>PromQL</th>
+<th>뜻</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>max_over_time(x[60s:1s])</code></td>
+<td>지난 60초 동안 1초 간격 값 중 최대</td>
+</tr>
+<tr>
+<td><code>increase(x_bucket[60s])</code></td>
+<td>60초 동안 구간별로 늘어난 횟수</td>
+</tr>
+<tr>
+<td><code>histogram_quantile(0.95, sum by (le) (...))</code></td>
+<td>구간별 횟수로 p95 계산</td>
+</tr>
+</tbody>
+</table></div>
+<h2 id="4-k6--오픈-순간-재현하기">4. k6 — 오픈 순간 재현하기 <a class="header-anchor" href="#4-k6--오픈-순간-재현하기">#</a></h2>
+<p><a href="https://github.com/RosieOh/Kopring_Core/blob/main/load-test/issue-direct.js#L23-L41" target="_blank" rel="noopener">issue-direct.js</a></p>
+<figure class="code-block"><figcaption><span class="code-lang">JavaScript</span><button type="button" class="copy-button" aria-label="코드 복사">복사</button></figcaption><div class="highlight"><pre><span></span><code><span class="k">export</span><span class="w"> </span><span class="kd">const</span><span class="w"> </span><span class="nx">options</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="nx">scenarios</span><span class="o">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="c1">// 오픈 순간 몰림: 모든 VU 가 동시에 출발해 1번씩 요청한다</span>
+<span class="w">    </span><span class="nx">rush</span><span class="o">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nx">executor</span><span class="o">:</span><span class="w"> </span><span class="s1">'per-vu-iterations'</span><span class="p">,</span><span class="w"> </span><span class="nx">vus</span><span class="o">:</span><span class="w"> </span><span class="nx">VUS</span><span class="p">,</span><span class="w"> </span><span class="nx">iterations</span><span class="o">:</span><span class="w"> </span><span class="mf">1</span><span class="p">,</span><span class="w"> </span><span class="nx">maxDuration</span><span class="o">:</span><span class="w"> </span><span class="s1">'2m'</span><span class="p">,</span><span class="w"> </span><span class="nx">exec</span><span class="o">:</span><span class="w"> </span><span class="s1">'rush'</span><span class="w"> </span><span class="p">},</span>
+<span class="w">    </span><span class="c1">// 다른 사용자가 같은 시간에 이벤트 목록을 본다 (DB 를 읽는 다른 API)</span>
+<span class="w">    </span><span class="p">...(</span><span class="nx">BROWSE_RATE</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="mf">0</span>
+<span class="w">      </span><span class="o">?</span><span class="w"> </span><span class="p">{</span>
+<span class="w">          </span><span class="nx">browse</span><span class="o">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="nx">executor</span><span class="o">:</span><span class="w"> </span><span class="s1">'constant-arrival-rate'</span><span class="p">,</span>
+<span class="w">            </span><span class="nx">rate</span><span class="o">:</span><span class="w"> </span><span class="nx">BROWSE_RATE</span><span class="p">,</span>
+<span class="w">            </span><span class="nx">timeUnit</span><span class="o">:</span><span class="w"> </span><span class="s1">'1s'</span><span class="p">,</span>
+<span class="w">            </span><span class="nx">duration</span><span class="o">:</span><span class="w"> </span><span class="sb">`</span><span class="si">${</span><span class="nx">BROWSE_SECONDS</span><span class="si">}</span><span class="sb">s`</span><span class="p">,</span>
+<span class="w">            </span><span class="nx">preAllocatedVUs</span><span class="o">:</span><span class="w"> </span><span class="nx">BROWSE_RATE</span><span class="p">,</span>
+<span class="w">            </span><span class="nx">maxVUs</span><span class="o">:</span><span class="w"> </span><span class="nx">BROWSE_RATE</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="mf">20</span><span class="p">,</span>
+<span class="w">            </span><span class="nx">exec</span><span class="o">:</span><span class="w"> </span><span class="s1">'browse'</span><span class="p">,</span>
+<span class="w">          </span><span class="p">},</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="w">      </span><span class="o">:</span><span class="w"> </span><span class="p">{}),</span>
+<span class="w">  </span><span class="p">},</span>
+</code></pre></div>
+</figure>
+<p>선착순 쿠폰의 부하는 &quot;초당 N건이 꾸준히&quot;가 아니라 &quot;<strong>정각에 한꺼번에</strong>&quot;입니다. 가상 사용자(VU) 전원이 동시에 출발해 한 번씩 요청하게 했습니다.</p>
+<p><code>browse</code> 시나리오(M5)는 <code>BROWSE_RATE</code> 를 주면 켜집니다. 발급이 몰리는 동안 다른 사용자가 이벤트 목록을 초당 N번 보게 해서, <strong>몰림이 다른 기능을 얼마나 느리게 하는지</strong> 잽니다. 두 시나리오가 함께 돌고, 결과는 <code>name</code> 태그(<code>issue</code>, <code>browse</code>)로 나눠 봅니다.</p>
+<p>토큰은 k6 가 직접 서명합니다.</p>
+<p><a href="https://github.com/RosieOh/Kopring_Core/blob/main/load-test/lib/common.js#L14-L20" target="_blank" rel="noopener">lib/common.js</a></p>
+<figure class="code-block"><figcaption><span class="code-lang">JavaScript</span><button type="button" class="copy-button" aria-label="코드 복사">복사</button></figcaption><div class="highlight"><pre><span></span><code><span class="cm">/**</span>
+<span class="cm"> * 회원 ID 로 access token 을 직접 서명한다.</span>
+<span class="cm"> *</span>
+<span class="cm"> * 회원 수천 명을 가입·로그인시키면 bcrypt 비용 때문에 준비에만 수 분이 걸리고, 그 부하가 측정에도 섞인다.</span>
+<span class="cm"> * 서버(JwtTokenProvider)는 서명·만료만 검증하고, 발급은 회원 존재 여부를 따지지 않으므로 토큰만 있으면 된다.</span>
+<span class="cm"> * 알고리즘은 jjwt 와 같이 키 길이로 정한다. (32~47바이트 HS256, 48~63바이트 HS384, 64바이트 이상 HS512)</span>
+<span class="cm"> */</span>
+</code></pre></div>
+</figure>
+<p><strong>측정하려는 것만 측정하기</strong>: 준비 작업(가입·로그인)이 측정에 섞이지 않게 했습니다. 이벤트 생성 같은 준비 요청은 <code>name: 'setup'</code> 태그로 구분해 결과에서 뺍니다.</p>
+<p>실행은 스크립트 하나로 합니다.</p>
+<figure class="code-block"><figcaption><span class="code-lang">Shell</span><button type="button" class="copy-button" aria-label="코드 복사">복사</button></figcaption><div class="highlight"><pre><span></span><code>./load-test/run-comparison.sh<span class="w">                                     </span><span class="c1"># 100·500·1000·2000명, 쿠폰 100장</span>
+<span class="nv">VUS_LIST</span><span class="o">=</span><span class="s2">"2000 5000"</span><span class="w"> </span><span class="nv">QUANTITY</span><span class="o">=</span><span class="m">1000</span><span class="w"> </span>./load-test/run-comparison.sh<span class="w">  </span><span class="c1"># 조건 바꾸기</span>
+<span class="nv">SCENARIOS</span><span class="o">=</span>direct<span class="w"> </span><span class="nv">LABEL</span><span class="o">=</span>lock<span class="w"> </span>./load-test/run-comparison.sh<span class="w">         </span><span class="c1"># 한 방식만, 결과는 results/lock/</span>
+</code></pre></div>
+</figure>
+<h2 id="5-숫자-읽는-법">5. 숫자 읽는 법 <a class="header-anchor" href="#5-숫자-읽는-법">#</a></h2>
+<h3 id="평균-대신-중앙값과-p95">평균 대신 중앙값과 p95 <a class="header-anchor" href="#평균-대신-중앙값과-p95">#</a></h3>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>통계</th>
+<th>뜻</th>
+<th>왜</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>중앙값 (p50)</td>
+<td>절반은 이보다 빠르다</td>
+<td>평균은 느린 몇 명에 끌려간다</td>
+</tr>
+<tr>
+<td>p95</td>
+<td>95% 는 이보다 빠르다</td>
+<td>&quot;운 나쁜 사용자&quot;의 경험</td>
+</tr>
+<tr>
+<td>최대</td>
+<td>가장 느린 한 명</td>
+<td>타임아웃에 얼마나 가까운지</td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="정합성부터-확인">정합성부터 확인 <a class="header-anchor" href="#정합성부터-확인">#</a></h3>
+<p>빠른 것보다 <strong>맞는 것</strong>이 먼저입니다. 모든 실행 후 DB 에서 &quot;발급 수량 = 발급 내역 건수 = min(쿠폰 수, 사용자 수)&quot;를 확인했습니다. 대기열 M3 의 5,000명 실행처럼 클라이언트가 시간 초과로 포기한 경우에도, 서버는 결국 1,000장을 정확히 나눠 줬습니다.</p>
+<h3 id="같은-조건에서-나란히">같은 조건에서 나란히 <a class="header-anchor" href="#같은-조건에서-나란히">#</a></h3>
+<p><a href="https://github.com/RosieOh/Kopring_Core/blob/main/load-test/README.md" target="_blank" rel="noopener">load-test/README.md</a> 의 &quot;방법&quot; 절:</p>
+<ul>
+<li>개선 전 숫자는 기록해 둔 옛 값이 아니라 <strong>M3 코드를 같은 날 같은 기계에서 따로 띄워</strong> 다시 쟀다.</li>
+<li>실행마다 워밍업(200명)을 먼저 돌려 JIT 영향을 뺐다.</li>
+<li>같은 조건이라도 실행마다 10~15% 흔들린다. (대기열 M3 1,000장 · 2,000명을 두 번 재서 14.23s, 12.19s)</li>
+</ul>
+<p>차이가 2배 이상이면 흔들림을 넘는 확실한 차이고, 10% 차이는 다시 재 봐야 합니다.</p>
+<h2 id="6-사례--m3-에서-m4-로">6. 사례 — M3 에서 M4 로 <a class="header-anchor" href="#6-사례--m3-에서-m4-로">#</a></h2>
+<p>M3 에서 처음 잰 결과가 병목 세 개를 가리켰고, M4 에서 각각 고친 뒤 다시 쟀습니다.</p>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>병목 (M3 에서 본 것)</th>
+<th>서버 지표가 말해 준 원인</th>
+<th>M4 의 처리</th>
+<th>결과</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>대기열: 1,000장에 12초</td>
+<td>워커가 회원마다 트랜잭션 (커밋 1,000번)</td>
+<td>50명씩 한 트랜잭션, 줄이 남으면 이어서 처리</td>
+<td>12.19s → <strong>1.86s</strong></td>
+</tr>
+<tr>
+<td>대기열: 요청 38,412건</td>
+<td>모두 0.5초마다 조회</td>
+<td>서버가 조회 간격을 알려 줌, SSE</td>
+<td>38,412 → <strong>6,163건</strong></td>
+</tr>
+<tr>
+<td>즉시 발급: 커넥션 대기 75</td>
+<td>사전 검사가 요청마다 DB 를 읽음</td>
+<td>사전 검사를 메모리 캐시로, 원자적 UPDATE 를 기본으로</td>
+<td>4.77s → <strong>1.92s</strong></td>
+</tr>
+</tbody>
+</table></div>
+<p>(1,000장 · 2,000명 기준, 중앙값)</p>
+<p>숫자를 읽고 설명하는 연습으로, README 의 해석 하나를 따라가 봅니다.</p>
+<blockquote>
+<p>원자적 UPDATE 의 대가는 DB 커넥션입니다. 행 잠금을 기다리는 요청은 DB 커넥션을 쥔 채 기다립니다. 1,000장 · 2,000명에서 커넥션을 얻으려고 기다린 요청이 110 까지 쌓였습니다(분산락은 기다림이 Redis 에서 일어나 0).</p>
+</blockquote>
+<p>응답 시간(k6)만 봤다면 &quot;원자적 UPDATE 가 무조건 낫다&quot;고 결론 냈을 겁니다. 서버 지표(<code>hikaricp_connections_pending</code>)가 대가를 보여 줬고, 그래서 방식을 설정으로 남기는 결정을 했습니다.</p>
+<p><strong>나빠진 곳도 기록합니다.</strong> 쿠폰 100장 · 2,000명에서는 대기열 p95 가 1.87s → 2.38s 로 늘었습니다. 조회 간격 힌트가 남은 쿠폰 수를 모르기 때문입니다. (<a href="09-redis-queue.html">9장</a>) 좋아진 숫자만 고르면 다음 개선 거리를 잃습니다.</p>
+<h3 id="측정의-한계를-같이-적는다">측정의 한계를 같이 적는다 <a class="header-anchor" href="#측정의-한계를-같이-적는다">#</a></h3>
+<ul>
+<li>k6·앱·DB 가 한 기계에서 자원을 나눠 썼다. 절대값보다 <strong>상대 비교</strong>다.</li>
+<li>서버 지표는 1초 간격 표본이라, 1초 안에 끝난 실행의 최대치는 놓칠 수 있다.</li>
+<li><code>bootRun</code> 은 JIT 를 C1 까지만 써서(<code>-XX:TieredStopAtLevel=1</code>) 운영(jar 실행)보다 느리다. 모든 실행이 같은 조건이다.</li>
+</ul>
+<p>한계를 적어 두면, 읽는 사람이 숫자를 과하게 믿지 않습니다.</p>
+<h2 id="흔한-실수">흔한 실수 <a class="header-anchor" href="#흔한-실수">#</a></h2>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>실수</th>
+<th>결과</th>
+<th>대신</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>태그에 회원 ID·요청 ID</td>
+<td>시계열 폭발, Prometheus 메모리 부족</td>
+<td>종류가 정해진 값만</td>
+</tr>
+<tr>
+<td>서버에서 p95 를 계산해 내보낸다</td>
+<td>서버 여러 대의 값을 합칠 수 없다</td>
+<td>히스토그램을 내보내고 Prometheus 에서 계산</td>
+</tr>
+<tr>
+<td>평균 응답 시간만 본다</td>
+<td>느린 사용자가 가려진다</td>
+<td>중앙값 + p95</td>
+</tr>
+<tr>
+<td>개선 후만 잰다, 개선 전은 옛 기록</td>
+<td>조건이 달라 비교가 안 된다</td>
+<td>같은 날 같은 기계에서 나란히</td>
+</tr>
+<tr>
+<td>한 번 재고 결론</td>
+<td>10~15% 흔들림을 개선으로 착각</td>
+<td>큰 차이만 믿고, 작은 차이는 다시 잰다</td>
+</tr>
+<tr>
+<td>준비 작업(가입·로그인)을 측정에 섞는다</td>
+<td>측정 대상이 아닌 비용이 섞인다</td>
+<td>토큰 직접 서명, setup 태그 분리</td>
+</tr>
+<tr>
+<td>응답 시간만 보고 결론</td>
+<td>대가(커넥션·스레드)를 못 본다</td>
+<td>서버 지표를 같이</td>
+</tr>
+</tbody>
+</table></div>
+<h2 id="직접-해보기">직접 해보기 <a class="header-anchor" href="#직접-해보기">#</a></h2>
+<ol>
+<li><code>CouponIssueMetrics</code> 에 이벤트 ID 를 태그로 추가하면 어떤 문제가 생길까요? 대기열 크기 게이지(<code>event_id</code> 태그)와는 무엇이 다른가요?</li>
+<li>로컬에서 <code>docker compose --profile monitoring up -d</code> 와 <code>./gradlew bootRun</code> 을 띄우고, <code>VUS_LIST=&quot;500&quot; ./load-test/run-comparison.sh</code> 를 돌리면서 Grafana 에서 DB 커넥션 대기 그래프를 관찰해 보세요.</li>
+<li><a href="https://github.com/RosieOh/Kopring_Core/blob/main/load-test/README.md" target="_blank" rel="noopener">load-test/README.md</a> 의 결과 표에서, 즉시 발급이 대기열보다 빠른 조건과 느린 조건을 하나씩 찾고 이유를 설명해 보세요.</li>
+</ol>
+<p>다음 장: <a href="12-next-steps-and-exercises.html">12장. 다음 공부와 연습 문제</a></p>
+
+</article>
+<p class="source-link"><a href="https://github.com/RosieOh/Kopring_Core/blob/main/docs/11-observability-and-load-test.md" target="_blank" rel="noopener">이 장의 원본 Markdown 보기</a></p>
+<nav class="pager" aria-label="장 이동"><a class="pager-prev" href="10-testing.html"><span>이전</span>10장. 테스트</a><a class="pager-next" href="12-next-steps-and-exercises.html"><span>다음</span>12장. 다음 공부와 연습 문제</a></nav>
+</main>
+<nav class="page-toc" aria-label="이 장의 목차"><p class="page-toc-title">이 장에서</p><ol><li class="toc-level-2"><a href="#1-왜-지표가-필요한가">1. 왜 지표가 필요한가</a></li>
+<li class="toc-level-2"><a href="#2-micrometer--지표를-남기는-코드">2. Micrometer — 지표를 남기는 코드</a></li>
+<li class="toc-level-3"><a href="#카운터--몇-번-일어났나">카운터 — 몇 번 일어났나</a></li>
+<li class="toc-level-3"><a href="#타이머--히스토그램--얼마나-걸렸나">타이머 + 히스토그램 — 얼마나 걸렸나</a></li>
+<li class="toc-level-3"><a href="#게이지--지금-몇-개인가">게이지 — 지금 몇 개인가</a></li>
+<li class="toc-level-3"><a href="#스프링이-알아서-주는-지표">스프링이 알아서 주는 지표</a></li>
+<li class="toc-level-2"><a href="#3-prometheus-와-grafana">3. Prometheus 와 Grafana</a></li>
+<li class="toc-level-2"><a href="#4-k6--오픈-순간-재현하기">4. k6 — 오픈 순간 재현하기</a></li>
+<li class="toc-level-2"><a href="#5-숫자-읽는-법">5. 숫자 읽는 법</a></li>
+<li class="toc-level-3"><a href="#평균-대신-중앙값과-p95">평균 대신 중앙값과 p95</a></li>
+<li class="toc-level-3"><a href="#정합성부터-확인">정합성부터 확인</a></li>
+<li class="toc-level-3"><a href="#같은-조건에서-나란히">같은 조건에서 나란히</a></li>
+<li class="toc-level-2"><a href="#6-사례--m3-에서-m4-로">6. 사례 — M3 에서 M4 로</a></li>
+<li class="toc-level-3"><a href="#측정의-한계를-같이-적는다">측정의 한계를 같이 적는다</a></li>
+<li class="toc-level-2"><a href="#흔한-실수">흔한 실수</a></li>
+<li class="toc-level-2"><a href="#직접-해보기">직접 해보기</a></li></ol></nav>
+</div>
+</body>
+</html>

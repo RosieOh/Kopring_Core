@@ -1,0 +1,645 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>9장. Redis 대기열 — 코프링 교재</title>
+<meta name="description" content="선착순 쿠폰 코드로 배우는 Kotlin + Spring Boot">
+<script>try{var t=localStorage.getItem("book-theme");if(t)document.documentElement.dataset.theme=t;}catch(e){}</script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+<link rel="stylesheet" href="assets/book.css">
+<link rel="stylesheet" href="assets/highlight.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11.4.1/dist/mermaid.min.js" defer></script>
+<script src="assets/book.js" defer></script>
+</head>
+<body>
+<a class="skip-link" href="#content">본문으로 건너뛰기</a>
+<header class="topbar">
+  <button type="button" class="menu-button" aria-label="장 목록 열기" aria-expanded="false" aria-controls="sidebar">목차</button>
+  <a class="topbar-title" href="index.html">코프링 교재</a>
+  <button type="button" class="theme-button" aria-label="밝은 화면과 어두운 화면 바꾸기">화면</button>
+</header>
+<div class="layout">
+<aside class="sidebar" id="sidebar">
+  <a class="sidebar-title" href="index.html">코프링 교재<small>선착순 쿠폰으로 배우는 Kotlin + Spring Boot</small></a>
+  <nav aria-label="장 목록"><ol class="chapter-list">
+<li><a href="index.html">처음에 — 읽는 법과 목차</a></li>
+<li><a href="01-kotlin-basics.html">1장. Kotlin 기초</a></li>
+<li><a href="02-spring-meets-kotlin.html">2장. 스프링이 Kotlin 을 만나면</a></li>
+<li><a href="03-architecture.html">3장. 프로젝트 구조와 계층</a></li>
+<li><a href="04-jpa-with-kotlin.html">4장. JPA 엔티티를 Kotlin 으로</a></li>
+<li><a href="05-web-and-errors.html">5장. 웹 계층과 예외 처리</a></li>
+<li><a href="06-auth.html">6장. 인증</a></li>
+<li><a href="07-concurrency.html">7장. 동시성 제어</a></li>
+<li><a href="08-async-and-reliability.html">8장. 비동기와 신뢰성</a></li>
+<li><a href="09-redis-queue.html" aria-current="page">9장. Redis 대기열</a></li>
+<li><a href="10-testing.html">10장. 테스트</a></li>
+<li><a href="11-observability-and-load-test.html">11장. 관측과 부하 테스트</a></li>
+<li><a href="12-next-steps-and-exercises.html">12장. 다음 공부와 연습 문제</a></li>
+<li><a href="13-virtual-threads-and-backpressure.html">13장. 심화: 가상 스레드와 몰림 대응</a></li>
+  </ol></nav>
+</aside>
+<main id="content" class="content">
+<article class="markdown">
+<h1 id="9장-redis-대기열--db-를-지키면서-줄-선-순서대로">9장. Redis 대기열 — DB 를 지키면서 줄 선 순서대로 <a class="header-anchor" href="#9장-redis-대기열--db-를-지키면서-줄-선-순서대로">#</a></h1>
+<p><strong>한 줄 요약</strong>: 요청 스레드는 Redis 에 줄만 세우고 바로 202 를 돌려줍니다. 워커가 앞에서부터 50명씩 꺼내 DB 에 발급합니다. 상태를 옮기는 모든 연산은 Lua 스크립트 하나로 실행해 &quot;꺼냈는데 어디에도 없는&quot; 중간 상태를 없앱니다.</p>
+<h2 id="1-왜-대기열인가">1. 왜 대기열인가 <a class="header-anchor" href="#1-왜-대기열인가">#</a></h2>
+<p>즉시 발급은 몰린 인원만큼 DB 에 요청이 들어갑니다. 5,000명이 몰리면 DB 커넥션 10개를 두고 5,000개 요청이 다툽니다. (<a href="07-concurrency.html">7장</a>)</p>
+<p>대기열은 이것을 바꿉니다.</p>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th></th>
+<th>즉시 발급</th>
+<th>대기열</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>요청 스레드가 하는 일</td>
+<td>DB 발급까지</td>
+<td>Redis 에 줄 서기만</td>
+</tr>
+<tr>
+<td>DB 에 들어가는 속도</td>
+<td>몰린 만큼</td>
+<td>워커 속도로 고정</td>
+</tr>
+<tr>
+<td>순서</td>
+<td>락을 먼저 잡은 사람</td>
+<td>줄 선 순서</td>
+</tr>
+<tr>
+<td>사용자 경험</td>
+<td>바로 결과</td>
+<td>&quot;N번째입니다&quot; → 나중에 결과</td>
+</tr>
+</tbody>
+</table></div>
+<p><a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/main/kotlin/com/site/domain/coupon/queue/CouponQueueService.kt#L11-L15" target="_blank" rel="noopener">CouponQueueService.kt</a></p>
+<figure class="code-block"><figcaption><span class="code-lang">Kotlin</span><button type="button" class="copy-button" aria-label="코드 복사">복사</button></figcaption><div class="highlight"><pre><span></span><code><span class="cm">/**</span>
+<span class="cm"> * 선착순 대기열. 요청 스레드는 Redis 에 줄만 세우고 바로 응답한다. 실제 발급(DB)은 CouponQueueWorker 가 순서대로 처리한다.</span>
+<span class="cm"> *</span>
+<span class="cm"> * 대기열은 트래픽을 완충할 뿐이고, "100장 초과 발급 금지" 같은 정합성은 여전히 DB(원자적 UPDATE)가 책임진다.</span>
+<span class="cm"> */</span>
+</code></pre></div>
+</figure>
+<p>대기열 이벤트는 즉시 발급 API 로 받을 수 없습니다. 섞어 열면 줄 선 사람보다 즉시 발급 API 를 직접 부른 사람이 먼저 받습니다(새치기). 그래서 이벤트마다 발급 방식(<code>CouponIssueMode</code>)을 정하고 양쪽 입구에서 확인합니다.</p>
+<h2 id="2-redis-자료구조와-키">2. Redis 자료구조와 키 <a class="header-anchor" href="#2-redis-자료구조와-키">#</a></h2>
+<p><a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/main/kotlin/com/site/infrastructure/redis/queue/RedisCouponQueueStore.kt#L11-L25" target="_blank" rel="noopener">RedisCouponQueueStore.kt</a></p>
+<figure class="code-block"><figcaption><span class="code-lang">Kotlin</span><button type="button" class="copy-button" aria-label="코드 복사">복사</button></figcaption><div class="highlight"><pre><span></span><code><span class="cm">/**</span>
+<span class="cm"> * 쿠폰 대기열의 Redis 저장소.</span>
+<span class="cm"> *</span>
+<span class="cm"> * 이벤트별 키 (중괄호는 Redis Cluster 해시 태그 — 같은 이벤트의 키들이 같은 슬롯에 모여서 Lua 스크립트에서 함께 쓸 수 있다)</span>
+<span class="cm"> * - coupon-queue:{id}:waiting     ZSET   대기 중. score = 들어온 순번</span>
+<span class="cm"> * - coupon-queue:{id}:processing  ZSET   처리 중. score = lease 만료 시각(epoch ms)</span>
+<span class="cm"> * - coupon-queue:{id}:seq         STRING 순번 발급용 카운터</span>
+<span class="cm"> * - coupon-queue:{id}:result      HASH   memberId → 처리 결과</span>
+<span class="cm"> * - coupon-queue:{id}:closed      STRING 마감 사유. 있으면 더 이상 줄을 설 수 없다</span>
+<span class="cm"> * 전역 키</span>
+<span class="cm"> * - coupon-queue:active           SET    대기열이 있는 이벤트 ID (워커가 순회할 대상)</span>
+<span class="cm"> *</span>
+<span class="cm"> * 상태를 옮기는 연산은 모두 Lua 스크립트 하나로 실행한다. Redis 는 스크립트 실행 중에 다른 명령을 끼워 넣지 않으므로</span>
+<span class="cm"> * "꺼냈는데 어디에도 기록되지 않은" 중간 상태가 생기지 않는다.</span>
+<span class="cm"> */</span>
+</code></pre></div>
+</figure>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>자료구조</th>
+<th>성질</th>
+<th>여기서 쓰는 이유</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>ZSET (정렬 집합)</td>
+<td>멤버마다 점수, 점수 순 정렬, 중복 없음</td>
+<td>순번 = 점수. <code>ZRANK</code> 로 내 순위, <code>ZPOPMIN</code> 으로 앞사람부터 꺼내기</td>
+</tr>
+<tr>
+<td>HASH</td>
+<td>키 하나 안의 필드 → 값</td>
+<td>회원 ID → 결과</td>
+</tr>
+<tr>
+<td>STRING + <code>INCR</code></td>
+<td>원자적 증가</td>
+<td>순번 발급</td>
+</tr>
+<tr>
+<td>SET</td>
+<td>중복 없는 집합</td>
+<td>워커가 돌아야 할 이벤트 목록</td>
+</tr>
+</tbody>
+</table></div>
+<p>처리 중 ZSET 의 점수가 &quot;lease 만료 시각&quot;이라는 점을 기억하세요. 점수로 &quot;만료된 것만&quot; 꺼낼 수 있습니다.</p>
+<h2 id="3-상태-전이">3. 상태 전이 <a class="header-anchor" href="#3-상태-전이">#</a></h2>
+<figure class="diagram"><pre class="mermaid" data-source="stateDiagram-v2
+    state &quot;대기 (waiting)&quot; as Waiting
+    state &quot;처리 중 (processing)&quot; as Processing
+    state &quot;결과 (result)&quot; as Result
+    [*] --&gt; Waiting: enqueue (순번 발급)
+    Waiting --&gt; Processing: claimNext (lease 설정)
+    Processing --&gt; Result: complete (ISSUED, SOLD_OUT, ENDED)
+    Processing --&gt; Processing: lease 만료 후 claimExpired (다른 워커가 다시 가져감)
+    Waiting --&gt; Result: drainWaiting (마감 후 한꺼번에)
+    Result --&gt; [*]
+">stateDiagram-v2
+    state &quot;대기 (waiting)&quot; as Waiting
+    state &quot;처리 중 (processing)&quot; as Processing
+    state &quot;결과 (result)&quot; as Result
+    [*] --&gt; Waiting: enqueue (순번 발급)
+    Waiting --&gt; Processing: claimNext (lease 설정)
+    Processing --&gt; Result: complete (ISSUED, SOLD_OUT, ENDED)
+    Processing --&gt; Processing: lease 만료 후 claimExpired (다른 워커가 다시 가져감)
+    Waiting --&gt; Result: drainWaiting (마감 후 한꺼번에)
+    Result --&gt; [*]
+</pre></figure>
+<p>포트의 주석이 이 전이를 계약으로 적습니다.</p>
+<p><a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/main/kotlin/com/site/domain/coupon/queue/port/CouponQueueStore.kt#L5-L13" target="_blank" rel="noopener">CouponQueueStore.kt</a></p>
+<figure class="code-block"><figcaption><span class="code-lang">Kotlin</span><button type="button" class="copy-button" aria-label="코드 복사">복사</button></figcaption><div class="highlight"><pre><span></span><code><span class="cm">/**</span>
+<span class="cm"> * 선착순 대기열 저장소 포트. 어떤 연산이 "원자적"이어야 하는지가 이 인터페이스의 계약이다.</span>
+<span class="cm"> *</span>
+<span class="cm"> * 회원은 대기(waiting) → 처리 중(processing) → 결과(result) 순서로 옮겨 간다.</span>
+<span class="cm"> * 처리 중에는 lease(만료 시각)가 붙어서, 처리하던 워커가 죽으면 lease 가 지난 뒤 다른 워커가 다시 가져간다.</span>
+<span class="cm"> */</span>
+<span class="kd">interface</span><span class="w"> </span><span class="nc">CouponQueueStore</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="cm">/** 결과 확인 → 처리 중 확인 → 마감 확인 → 대기 중 확인 → 순번 발급 → 추가를 원자적으로 한다. */</span>
+<span class="w">    </span><span class="kd">fun</span><span class="w"> </span><span class="nf">enqueue</span><span class="p">(</span><span class="n">couponEventId</span><span class="p">:</span><span class="w"> </span><span class="kt">Long</span><span class="p">,</span><span class="w"> </span><span class="n">memberId</span><span class="p">:</span><span class="w"> </span><span class="kt">Long</span><span class="p">):</span><span class="w"> </span><span class="n">EnqueueResult</span>
+</code></pre></div>
+</figure>
+<h2 id="4-lua-스크립트--여러-명령을-하나처럼">4. Lua 스크립트 — 여러 명령을 하나처럼 <a class="header-anchor" href="#4-lua-스크립트--여러-명령을-하나처럼">#</a></h2>
+<p>줄 서기는 확인할 것이 많습니다. 이미 결과가 있나? 처리 중인가? 마감됐나? 이미 줄에 있나? 이것들을 명령 여러 개로 보내면, 사이사이에 워커가 끼어들어 상태가 바뀝니다.</p>
+<p><a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/main/kotlin/com/site/infrastructure/redis/queue/RedisCouponQueueStore.kt#L158-L182" target="_blank" rel="noopener">RedisCouponQueueStore.kt</a></p>
+<figure class="code-block"><figcaption><span class="code-lang">Kotlin</span><button type="button" class="copy-button" aria-label="코드 복사">복사</button></figcaption><div class="highlight"><pre><span></span><code><span class="c1">// KEYS: waiting, seq, result, closed, processing / ARGV: memberId, ttlSeconds</span>
+<span class="kd">private</span><span class="w"> </span><span class="kd">val</span><span class="w"> </span><span class="nv">ENQUEUE_SCRIPT</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">DefaultRedisScript</span><span class="p">(</span>
+<span class="w">    </span><span class="s">"""</span>
+<span class="s">    if redis.call('HEXISTS', KEYS[3], ARGV[1]) == 1 then</span>
+<span class="s">      return -2</span>
+<span class="s">    end</span>
+<span class="s">    if redis.call('ZSCORE', KEYS[5], ARGV[1]) then</span>
+<span class="s">      return -2</span>
+<span class="s">    end</span>
+<span class="s">    if redis.call('EXISTS', KEYS[4]) == 1 then</span>
+<span class="s">      return -1</span>
+<span class="s">    end</span>
+<span class="s">    local rank = redis.call('ZRANK', KEYS[1], ARGV[1])</span>
+<span class="s">    if rank then</span>
+<span class="s">      return rank</span>
+<span class="s">    end</span>
+<span class="s">    local seq = redis.call('INCR', KEYS[2])</span>
+<span class="s">    redis.call('ZADD', KEYS[1], seq, ARGV[1])</span>
+<span class="s">    redis.call('EXPIRE', KEYS[1], ARGV[2])</span>
+<span class="s">    redis.call('EXPIRE', KEYS[2], ARGV[2])</span>
+<span class="s">    return redis.call('ZRANK', KEYS[1], ARGV[1])</span>
+<span class="s">    """</span><span class="p">.</span><span class="na">trimIndent</span><span class="p">(),</span>
+<span class="w">    </span><span class="c1">// Long::class.java 는 원시 타입 long 을 가리킨다. 래퍼 클래스(java.lang.Long)가 필요해서 javaObjectType 을 쓴다.</span>
+<span class="w">    </span><span class="kt">Long</span><span class="o">::</span><span class="n">class</span><span class="p">.</span><span class="na">javaObjectType</span><span class="p">,</span>
+<span class="p">)</span>
+</code></pre></div>
+</figure>
+<p>읽는 법:</p>
+<ul>
+<li><code>KEYS[n]</code> 은 스크립트에 넘긴 키 목록, <code>ARGV[n]</code> 은 값 목록입니다. Lua 배열은 1부터 셉니다.</li>
+<li>위에서부터 차례로 확인하고, 해당하면 바로 돌려줍니다.</li>
+<li>이미 줄에 있으면 <strong>같은 순번</strong>을 돌려줍니다. 새로고침해도 뒤로 밀리지 않습니다.</li>
+<li>모든 키에 <code>EXPIRE</code> 를 겁니다. 이벤트가 끝난 뒤 키가 Redis 에 영원히 남지 않게 합니다(기본 1일).</li>
+</ul>
+<p><code>-2</code>, <code>-1</code> 같은 특수 값은 Kotlin 쪽에서 바로 sealed 타입(<code>EnqueueResult</code>)으로 바꿉니다. Lua 의 한계(값 하나만 돌려줌)를 경계에서 한 번만 처리하고, 나머지 코드는 의미 있는 타입만 봅니다. (<a href="01-kotlin-basics.html">1장</a>)</p>
+<h3 id="꺼내기--대기에서-처리-중으로">꺼내기 — 대기에서 처리 중으로 <a class="header-anchor" href="#꺼내기--대기에서-처리-중으로">#</a></h3>
+<p><a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/main/kotlin/com/site/infrastructure/redis/queue/RedisCouponQueueStore.kt#L184-L200" target="_blank" rel="noopener">RedisCouponQueueStore.kt</a></p>
+<figure class="code-block"><figcaption><span class="code-lang">Kotlin</span><button type="button" class="copy-button" aria-label="코드 복사">복사</button></figcaption><div class="highlight"><pre><span></span><code><span class="c1">// KEYS: waiting, processing / ARGV: count, leaseUntil, ttlSeconds</span>
+<span class="c1">// ZPOPMIN 은 [회원, 점수, 회원, 점수, ...] 를 순번 순서로 돌려준다</span>
+<span class="kd">private</span><span class="w"> </span><span class="kd">val</span><span class="w"> </span><span class="nv">CLAIM_NEXT_SCRIPT</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">DefaultRedisScript</span><span class="p">(</span>
+<span class="w">    </span><span class="s">"""</span>
+<span class="s">    local popped = redis.call('ZPOPMIN', KEYS[1], ARGV[1])</span>
+<span class="s">    local members = {}</span>
+<span class="s">    for i = 1, #popped, 2 do</span>
+<span class="s">      members[#members + 1] = popped[i]</span>
+<span class="s">      redis.call('ZADD', KEYS[2], ARGV[2], popped[i])</span>
+<span class="s">    end</span>
+<span class="s">    if #members &gt; 0 then</span>
+<span class="s">      redis.call('EXPIRE', KEYS[2], ARGV[3])</span>
+<span class="s">    end</span>
+<span class="s">    return members</span>
+<span class="s">    """</span><span class="p">.</span><span class="na">trimIndent</span><span class="p">(),</span>
+<span class="w">    </span><span class="n">List</span><span class="o">::</span><span class="n">class</span><span class="p">.</span><span class="na">java</span><span class="p">,</span>
+<span class="p">)</span>
+</code></pre></div>
+</figure>
+<p><code>ZPOPMIN</code> 으로 꺼내고 곧바로 처리 중 ZSET 에 넣습니다. 둘 사이에 워커가 죽어도 회원이 사라지지 않습니다. 스크립트 전체가 실행되거나, 아예 실행되지 않거나 둘 중 하나이기 때문입니다.</p>
+<h3 id="해시-태그-id">해시 태그 <code>{id}</code> <a class="header-anchor" href="#해시-태그-id">#</a></h3>
+<p>Redis Cluster 는 키를 16,384 개의 슬롯에 나눠 여러 서버에 둡니다. <strong>Lua 스크립트는 한 슬롯의 키만 다룰 수 있습니다.</strong> 키에 <code>{7}</code> 처럼 중괄호가 있으면 클러스터는 중괄호 안만 보고 슬롯을 정합니다. 그래서 <code>coupon-queue:{7}:waiting</code> 과 <code>coupon-queue:{7}:processing</code> 은 항상 같은 슬롯에 있습니다.</p>
+<p>지금은 단일 Redis 를 쓰지만, 키 이름을 처음부터 이렇게 지어 두면 클러스터로 옮길 때 코드를 고치지 않아도 됩니다.</p>
+<h2 id="5-워커--앞에서부터-50명씩">5. 워커 — 앞에서부터 50명씩 <a class="header-anchor" href="#5-워커--앞에서부터-50명씩">#</a></h2>
+<p><a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/main/kotlin/com/site/domain/coupon/queue/CouponQueueWorker.kt#L14-L70" target="_blank" rel="noopener">CouponQueueWorker.kt</a></p>
+<figure class="code-block"><figcaption><span class="code-lang">Kotlin</span><button type="button" class="copy-button" aria-label="코드 복사">복사</button></figcaption><div class="highlight"><pre><span></span><code><span class="cm">/**</span>
+<span class="cm"> * 대기열에서 앞사람부터 꺼내 실제로 발급한다. CouponQueueScheduler 가 주기적으로 부른다. (테스트에서는 직접 부른다)</span>
+<span class="cm"> *</span>
+<span class="cm"> * 한 주기에 하는 일</span>
+<span class="cm"> * 1. lease 가 지난 "처리 중" 회원을 다시 처리한다 — 이전 워커가 꺼내 놓고 죽은 경우</span>
+<span class="cm"> * 2. 대기열이 닫혔으면 대기 중인 회원을 DB 를 거치지 않고 같은 결과로 정리한다</span>
+<span class="cm"> * 3. 앞에서부터 batchSize 명씩 꺼내 한 트랜잭션으로 일괄 발급한다. 줄이 남아 있으면 maxBusyTime 까지 쉬지 않고 이어서 처리한다</span>
+<span class="cm"> *</span>
+<span class="cm"> * 같은 회원을 두 번 처리해도 안전하다. 일괄 발급은 이미 받은 회원을 발급된 것으로 돌려준다. (멱등)</span>
+<span class="cm"> */</span>
+<span class="nd">@Component</span>
+<span class="kd">class</span><span class="w"> </span><span class="nc">CouponQueueWorker</span><span class="p">(</span>
+<span class="w">    </span><span class="kd">private</span><span class="w"> </span><span class="kd">val</span><span class="w"> </span><span class="nv">couponQueueStore</span><span class="p">:</span><span class="w"> </span><span class="n">CouponQueueStore</span><span class="p">,</span>
+<span class="w">    </span><span class="kd">private</span><span class="w"> </span><span class="kd">val</span><span class="w"> </span><span class="nv">couponIssueService</span><span class="p">:</span><span class="w"> </span><span class="n">CouponIssueService</span><span class="p">,</span>
+<span class="w">    </span><span class="kd">private</span><span class="w"> </span><span class="kd">val</span><span class="w"> </span><span class="nv">properties</span><span class="p">:</span><span class="w"> </span><span class="n">CouponQueueProperties</span><span class="p">,</span>
+<span class="w">    </span><span class="kd">private</span><span class="w"> </span><span class="kd">val</span><span class="w"> </span><span class="nv">issueMetrics</span><span class="p">:</span><span class="w"> </span><span class="n">CouponIssueMetrics</span><span class="p">,</span>
+<span class="w">    </span><span class="kd">private</span><span class="w"> </span><span class="kd">val</span><span class="w"> </span><span class="nv">queueMetrics</span><span class="p">:</span><span class="w"> </span><span class="n">CouponQueueMetrics</span><span class="p">,</span>
+<span class="w">    </span><span class="kd">private</span><span class="w"> </span><span class="kd">val</span><span class="w"> </span><span class="nv">clock</span><span class="p">:</span><span class="w"> </span><span class="n">Clock</span><span class="p">,</span>
+<span class="p">)</span><span class="w"> </span><span class="p">{</span>
+
+<span class="w">    </span><span class="kd">private</span><span class="w"> </span><span class="kd">val</span><span class="w"> </span><span class="nv">log</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">LoggerFactory</span><span class="p">.</span><span class="na">getLogger</span><span class="p">(</span><span class="n">javaClass</span><span class="p">)</span>
+
+<span class="w">    </span><span class="kd">fun</span><span class="w"> </span><span class="nf">processAll</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">couponQueueStore</span><span class="p">.</span><span class="na">activeEventIds</span><span class="p">().</span><span class="na">forEach</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">couponEventId</span><span class="w"> </span><span class="o">-&gt;</span>
+<span class="w">            </span><span class="n">runCatching</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">process</span><span class="p">(</span><span class="n">couponEventId</span><span class="p">)</span><span class="w"> </span><span class="p">}</span>
+<span class="w">                </span><span class="p">.</span><span class="na">onFailure</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">log</span><span class="p">.</span><span class="na">error</span><span class="p">(</span><span class="s">"대기열 처리 중 오류. couponEventId={}"</span><span class="p">,</span><span class="w"> </span><span class="n">couponEventId</span><span class="p">,</span><span class="w"> </span><span class="nb">it</span><span class="p">)</span><span class="w"> </span><span class="p">}</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="w">        </span><span class="n">queueMetrics</span><span class="p">.</span><span class="na">refresh</span><span class="p">(</span><span class="n">couponQueueStore</span><span class="p">.</span><span class="na">activeEventIds</span><span class="p">())</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="kd">private</span><span class="w"> </span><span class="kd">fun</span><span class="w"> </span><span class="nf">process</span><span class="p">(</span><span class="n">couponEventId</span><span class="p">:</span><span class="w"> </span><span class="kt">Long</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="kd">val</span><span class="w"> </span><span class="nv">startedAt</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">clock</span><span class="p">.</span><span class="na">millis</span><span class="p">()</span>
+
+<span class="w">        </span><span class="kd">val</span><span class="w"> </span><span class="nv">expired</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">couponQueueStore</span><span class="p">.</span><span class="na">claimExpired</span><span class="p">(</span><span class="n">couponEventId</span><span class="p">,</span><span class="w"> </span><span class="n">startedAt</span><span class="p">,</span><span class="w"> </span><span class="n">properties</span><span class="p">.</span><span class="na">batchSize</span><span class="p">,</span><span class="w"> </span><span class="n">leaseUntil</span><span class="p">())</span>
+<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">expired</span><span class="p">.</span><span class="na">isNotEmpty</span><span class="p">())</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="n">log</span><span class="p">.</span><span class="na">warn</span><span class="p">(</span><span class="s">"처리 중에 멈춘 회원 {}명을 다시 처리합니다. couponEventId={}"</span><span class="p">,</span><span class="w"> </span><span class="n">expired</span><span class="p">.</span><span class="na">size</span><span class="p">,</span><span class="w"> </span><span class="n">couponEventId</span><span class="p">)</span>
+<span class="w">            </span><span class="c1">// 발급까지 끝낸 뒤 죽었을 수도 있지만, 일괄 발급은 이미 받은 회원을 발급된 것으로 돌려주므로 마감 여부와 상관없이 다시 처리한다</span>
+<span class="w">            </span><span class="n">issueBatch</span><span class="p">(</span><span class="n">couponEventId</span><span class="p">,</span><span class="w"> </span><span class="n">expired</span><span class="p">)</span>
+<span class="w">        </span><span class="p">}</span>
+
+<span class="w">        </span><span class="k">while</span><span class="w"> </span><span class="p">(</span><span class="kc">true</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="n">couponQueueStore</span><span class="p">.</span><span class="na">closedReason</span><span class="p">(</span><span class="n">couponEventId</span><span class="p">)</span><span class="o">?.</span><span class="na">let</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">reason</span><span class="w"> </span><span class="o">-&gt;</span>
+<span class="w">                </span><span class="n">drain</span><span class="p">(</span><span class="n">couponEventId</span><span class="p">,</span><span class="w"> </span><span class="n">reason</span><span class="p">)</span>
+<span class="w">                </span><span class="k">return</span>
+<span class="w">            </span><span class="p">}</span>
+
+<span class="w">            </span><span class="kd">val</span><span class="w"> </span><span class="nv">claimed</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">couponQueueStore</span><span class="p">.</span><span class="na">claimNext</span><span class="p">(</span><span class="n">couponEventId</span><span class="p">,</span><span class="w"> </span><span class="n">properties</span><span class="p">.</span><span class="na">batchSize</span><span class="p">,</span><span class="w"> </span><span class="n">leaseUntil</span><span class="p">())</span>
+<span class="w">            </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">claimed</span><span class="p">.</span><span class="na">isEmpty</span><span class="p">())</span><span class="w"> </span><span class="p">{</span>
+<span class="w">                </span><span class="n">couponQueueStore</span><span class="p">.</span><span class="na">deactivateIfEmpty</span><span class="p">(</span><span class="n">couponEventId</span><span class="p">)</span>
+<span class="w">                </span><span class="k">return</span>
+<span class="w">            </span><span class="p">}</span>
+<span class="w">            </span><span class="n">issueBatch</span><span class="p">(</span><span class="n">couponEventId</span><span class="p">,</span><span class="w"> </span><span class="n">claimed</span><span class="p">)</span>
+
+<span class="w">            </span><span class="c1">// 꽉 찬 배치였다면 줄이 더 남아 있을 수 있으니 쉬지 않고 이어서 처리한다 (한 이벤트에 maxBusyTime 까지만)</span>
+<span class="w">            </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">claimed</span><span class="p">.</span><span class="na">size</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">properties</span><span class="p">.</span><span class="na">batchSize</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="n">clock</span><span class="p">.</span><span class="na">millis</span><span class="p">()</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">startedAt</span><span class="w"> </span><span class="o">&gt;=</span><span class="w"> </span><span class="n">properties</span><span class="p">.</span><span class="na">maxBusyTime</span><span class="p">.</span><span class="na">toMillis</span><span class="p">())</span><span class="w"> </span><span class="k">return</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="w">    </span><span class="p">}</span>
+</code></pre></div>
+</figure>
+<p>워커는 스케줄러가 200ms 마다 부릅니다(<code>fixedDelay</code>, <a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/main/kotlin/com/site/domain/coupon/queue/CouponQueueScheduler.kt" target="_blank" rel="noopener">CouponQueueScheduler.kt</a>). 이벤트 하나에서 오류가 나도 <code>runCatching</code> 으로 다른 이벤트는 계속 처리합니다.</p>
+<h3 id="일괄-발급--50명에-커밋-한-번">일괄 발급 — 50명에 커밋 한 번 <a class="header-anchor" href="#일괄-발급--50명에-커밋-한-번">#</a></h3>
+<p>M3 의 워커는 회원마다 트랜잭션을 열었습니다. 커밋(디스크 기록)이 회원 수만큼 일어나서, 1,000장을 나눠 주는 데 12초가 걸렸습니다. M4 에서 50명을 한 트랜잭션으로 묶었습니다.</p>
+<p><a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/main/kotlin/com/site/domain/coupon/service/CouponIssueService.kt#L87-L125" target="_blank" rel="noopener">CouponIssueService.kt</a></p>
+<figure class="code-block"><figcaption><span class="code-lang">Kotlin</span><button type="button" class="copy-button" aria-label="코드 복사">복사</button></figcaption><div class="highlight"><pre><span></span><code><span class="cm">/**</span>
+<span class="cm"> * 대기열 워커 전용: 꺼낸 회원들을 한 트랜잭션에서 한꺼번에 발급한다.</span>
+<span class="cm"> *</span>
+<span class="cm"> * 이벤트 행을 잠그고(SELECT ... FOR UPDATE) 남은 수량만큼 앞사람부터 나눠 준다. 회원마다 트랜잭션을 열면</span>
+<span class="cm"> * 커밋(디스크 기록)이 회원 수만큼 일어나지만, 여기서는 배치당 한 번이다.</span>
+<span class="cm"> * 이미 받은 회원(이전 처리 도중 워커가 죽은 경우)은 다시 발급하지 않고 발급된 것으로 돌려준다. (다시 처리해도 안전하다)</span>
+<span class="cm"> * 행 잠금 덕분에 워커가 여러 대여도 수량을 넘지 않는다.</span>
+<span class="cm"> */</span>
+<span class="nd">@Transactional</span>
+<span class="kd">fun</span><span class="w"> </span><span class="nf">issueQueuedBatch</span><span class="p">(</span><span class="n">couponEventId</span><span class="p">:</span><span class="w"> </span><span class="kt">Long</span><span class="p">,</span><span class="w"> </span><span class="n">memberIds</span><span class="p">:</span><span class="w"> </span><span class="n">List</span><span class="o">&lt;</span><span class="kt">Long</span><span class="o">&gt;</span><span class="p">):</span><span class="w"> </span><span class="n">QueuedBatchIssueResult</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kd">val</span><span class="w"> </span><span class="nv">now</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">now</span><span class="p">()</span>
+<span class="w">    </span><span class="kd">val</span><span class="w"> </span><span class="nv">couponEvent</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">couponEventRepository</span><span class="p">.</span><span class="na">findByIdForUpdate</span><span class="p">(</span><span class="n">couponEventId</span><span class="p">)</span>
+<span class="w">        </span><span class="o">?:</span><span class="w"> </span><span class="k">throw</span><span class="w"> </span><span class="n">ServiceException</span><span class="p">(</span><span class="n">ErrorCode</span><span class="p">.</span><span class="na">COUPON_EVENT_NOT_FOUND</span><span class="p">)</span>
+<span class="w">    </span><span class="n">couponEvent</span><span class="p">.</span><span class="na">checkIssueMode</span><span class="p">(</span><span class="n">CouponIssueMode</span><span class="p">.</span><span class="na">QUEUE</span><span class="p">)</span>
+
+<span class="w">    </span><span class="kd">val</span><span class="w"> </span><span class="nv">alreadyIssued</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">issuedCouponRepository</span><span class="p">.</span><span class="na">findIssuedMemberIds</span><span class="p">(</span><span class="n">couponEventId</span><span class="p">,</span><span class="w"> </span><span class="n">memberIds</span><span class="p">).</span><span class="na">toSet</span><span class="p">()</span>
+<span class="w">    </span><span class="kd">val</span><span class="w"> </span><span class="nv">candidates</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">memberIds</span><span class="p">.</span><span class="na">filterNot</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nb">it</span><span class="w"> </span><span class="k">in</span><span class="w"> </span><span class="n">alreadyIssued</span><span class="w"> </span><span class="p">}</span>
+<span class="w">    </span><span class="kd">val</span><span class="w"> </span><span class="nv">status</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">couponEvent</span><span class="p">.</span><span class="na">status</span><span class="p">(</span><span class="n">now</span><span class="p">)</span>
+<span class="w">    </span><span class="kd">val</span><span class="w"> </span><span class="nv">winners</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">status</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="n">CouponEventStatus</span><span class="p">.</span><span class="na">ONGOING</span><span class="p">)</span><span class="w"> </span><span class="n">candidates</span><span class="p">.</span><span class="na">take</span><span class="p">(</span><span class="n">couponEvent</span><span class="p">.</span><span class="na">remainingQuantity</span><span class="p">)</span><span class="w"> </span><span class="k">else</span><span class="w"> </span><span class="n">emptyList</span><span class="p">()</span>
+
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">winners</span><span class="p">.</span><span class="na">isNotEmpty</span><span class="p">())</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">couponEvent</span><span class="p">.</span><span class="na">issue</span><span class="p">(</span><span class="n">now</span><span class="p">,</span><span class="w"> </span><span class="n">quantity</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">winners</span><span class="p">.</span><span class="na">size</span><span class="p">)</span>
+<span class="w">        </span><span class="kd">val</span><span class="w"> </span><span class="nv">expiresAt</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">couponEvent</span><span class="p">.</span><span class="na">couponExpiresAt</span><span class="p">(</span><span class="n">now</span><span class="p">)</span>
+<span class="w">        </span><span class="n">issuedCouponRepository</span><span class="p">.</span><span class="na">saveAll</span><span class="p">(</span><span class="n">winners</span><span class="p">.</span><span class="na">map</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">IssuedCoupon</span><span class="p">(</span><span class="n">couponEventId</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">couponEventId</span><span class="p">,</span><span class="w"> </span><span class="n">memberId</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nb">it</span><span class="p">,</span><span class="w"> </span><span class="n">expiresAt</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">expiresAt</span><span class="p">)</span><span class="w"> </span><span class="p">})</span>
+<span class="w">            </span><span class="p">.</span><span class="na">forEach</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">notificationOutboxService</span><span class="p">.</span><span class="na">recordCouponIssued</span><span class="p">(</span><span class="n">CouponIssuedEvent</span><span class="p">(</span><span class="nb">it</span><span class="p">.</span><span class="na">id</span><span class="p">,</span><span class="w"> </span><span class="n">couponEventId</span><span class="p">,</span><span class="w"> </span><span class="nb">it</span><span class="p">.</span><span class="na">memberId</span><span class="p">))</span><span class="w"> </span><span class="p">}</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="kd">val</span><span class="w"> </span><span class="nv">issued</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">alreadyIssued</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">winners</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="n">QueuedBatchIssueResult</span><span class="p">(</span>
+<span class="w">        </span><span class="n">issued</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">memberIds</span><span class="p">.</span><span class="na">filter</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nb">it</span><span class="w"> </span><span class="k">in</span><span class="w"> </span><span class="n">issued</span><span class="w"> </span><span class="p">},</span>
+<span class="w">        </span><span class="n">rejected</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">candidates</span><span class="p">.</span><span class="na">drop</span><span class="p">(</span><span class="n">winners</span><span class="p">.</span><span class="na">size</span><span class="p">),</span>
+<span class="w">        </span><span class="n">rejectReason</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">when</span><span class="w"> </span><span class="p">(</span><span class="n">status</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="n">CouponEventStatus</span><span class="p">.</span><span class="na">ENDED</span><span class="w"> </span><span class="o">-&gt;</span><span class="w"> </span><span class="n">ErrorCode</span><span class="p">.</span><span class="na">COUPON_EVENT_ENDED</span>
+<span class="w">            </span><span class="n">CouponEventStatus</span><span class="p">.</span><span class="na">UPCOMING</span><span class="w"> </span><span class="o">-&gt;</span><span class="w"> </span><span class="n">ErrorCode</span><span class="p">.</span><span class="na">COUPON_EVENT_NOT_STARTED</span>
+<span class="w">            </span><span class="k">else</span><span class="w"> </span><span class="o">-&gt;</span><span class="w"> </span><span class="n">ErrorCode</span><span class="p">.</span><span class="na">COUPON_SOLD_OUT</span>
+<span class="w">        </span><span class="p">},</span>
+<span class="w">        </span><span class="n">remainingQuantity</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">couponEvent</span><span class="p">.</span><span class="na">remainingQuantity</span><span class="p">,</span>
+<span class="w">    </span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></div>
+</figure>
+<p>여기서는 원자적 UPDATE 대신 <strong>비관적 락</strong>을 씁니다. &quot;남은 수량을 보고 그만큼 앞사람에게 나눠 준다&quot;는 판단을 UPDATE 한 문장으로 쓰기 어렵기 때문입니다. 행을 잠그는 것은 워커 하나가 배치당 한 번이라, 즉시 발급처럼 수천 명이 커넥션을 쥔 채 기다리는 일은 없습니다.</p>
+<h3 id="멱등--두-번-처리해도-같은-결과">멱등 — 두 번 처리해도 같은 결과 <a class="header-anchor" href="#멱등--두-번-처리해도-같은-결과">#</a></h3>
+<p>워커가 50명을 DB 에 발급하고 커밋한 직후, Redis 에 결과를 기록하기 전에 죽었다고 해 봅시다. lease 가 지나면 다른 워커가 그 50명을 다시 가져갑니다. 이미 받은 회원을 또 발급하면 안 됩니다.</p>
+<p><code>findIssuedMemberIds</code> 로 이미 받은 회원을 찾아 <strong>발급된 것으로</strong> 돌려줍니다. 같은 입력을 두 번 처리해도 결과가 같은 성질을 <strong>멱등성</strong>이라고 합니다. lease 로 재처리하는 구조라면 처리 로직이 반드시 멱등이어야 합니다.</p>
+<h3 id="결과-기록과-마감">결과 기록과 마감 <a class="header-anchor" href="#결과-기록과-마감">#</a></h3>
+<p><a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/main/kotlin/com/site/domain/coupon/queue/CouponQueueWorker.kt#L72-L89" target="_blank" rel="noopener">CouponQueueWorker.kt</a></p>
+<figure class="code-block"><figcaption><span class="code-lang">Kotlin</span><button type="button" class="copy-button" aria-label="코드 복사">복사</button></figcaption><div class="highlight"><pre><span></span><code><span class="kd">private</span><span class="w"> </span><span class="kd">fun</span><span class="w"> </span><span class="nf">issueBatch</span><span class="p">(</span><span class="n">couponEventId</span><span class="p">:</span><span class="w"> </span><span class="kt">Long</span><span class="p">,</span><span class="w"> </span><span class="n">memberIds</span><span class="p">:</span><span class="w"> </span><span class="n">List</span><span class="o">&lt;</span><span class="kt">Long</span><span class="o">&gt;</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kd">val</span><span class="w"> </span><span class="nv">batch</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">try</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">couponIssueService</span><span class="p">.</span><span class="na">issueQueuedBatch</span><span class="p">(</span><span class="n">couponEventId</span><span class="p">,</span><span class="w"> </span><span class="n">memberIds</span><span class="p">)</span>
+<span class="w">    </span><span class="p">}</span><span class="w"> </span><span class="k">catch</span><span class="w"> </span><span class="p">(</span><span class="n">e</span><span class="p">:</span><span class="w"> </span><span class="n">Exception</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">log</span><span class="p">.</span><span class="na">warn</span><span class="p">(</span><span class="s">"일괄 발급에 실패해 한 명씩 다시 처리합니다. couponEventId={}, members={}"</span><span class="p">,</span><span class="w"> </span><span class="n">couponEventId</span><span class="p">,</span><span class="w"> </span><span class="n">memberIds</span><span class="p">.</span><span class="na">size</span><span class="p">,</span><span class="w"> </span><span class="n">e</span><span class="p">)</span>
+<span class="w">        </span><span class="kc">null</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">    </span><span class="kd">val</span><span class="w"> </span><span class="nv">results</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">batch</span><span class="o">?.</span><span class="na">toQueueResults</span><span class="p">()</span><span class="w"> </span><span class="o">?:</span><span class="w"> </span><span class="n">memberIds</span><span class="p">.</span><span class="na">associateWith</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">issueOne</span><span class="p">(</span><span class="n">couponEventId</span><span class="p">,</span><span class="w"> </span><span class="nb">it</span><span class="p">)</span><span class="w"> </span><span class="p">}</span>
+
+<span class="w">    </span><span class="n">results</span><span class="p">.</span><span class="na">entries</span><span class="p">.</span><span class="na">groupBy</span><span class="p">({</span><span class="w"> </span><span class="nb">it</span><span class="p">.</span><span class="na">value</span><span class="w"> </span><span class="p">},</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nb">it</span><span class="p">.</span><span class="na">key</span><span class="w"> </span><span class="p">}).</span><span class="na">forEach</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="p">(</span><span class="n">result</span><span class="p">,</span><span class="w"> </span><span class="n">ids</span><span class="p">)</span><span class="w"> </span><span class="o">-&gt;</span>
+<span class="w">        </span><span class="n">couponQueueStore</span><span class="p">.</span><span class="na">complete</span><span class="p">(</span><span class="n">couponEventId</span><span class="p">,</span><span class="w"> </span><span class="n">ids</span><span class="p">,</span><span class="w"> </span><span class="n">result</span><span class="p">)</span>
+<span class="w">        </span><span class="n">issueMetrics</span><span class="p">.</span><span class="na">recordQueue</span><span class="p">(</span><span class="n">result</span><span class="p">,</span><span class="w"> </span><span class="n">count</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">ids</span><span class="p">.</span><span class="na">size</span><span class="p">.</span><span class="na">toLong</span><span class="p">())</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">    </span><span class="c1">// 소진·종료를 만나면 대기열을 닫아 새로 줄 서는 것을 막는다. 남은 대기자는 다음 반복에서 한꺼번에 정리한다</span>
+<span class="w">    </span><span class="n">results</span><span class="p">.</span><span class="na">values</span><span class="p">.</span><span class="na">firstOrNull</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nb">it</span><span class="p">.</span><span class="na">closesQueue</span><span class="w"> </span><span class="p">}</span><span class="o">?.</span><span class="na">let</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">couponQueueStore</span><span class="p">.</span><span class="na">close</span><span class="p">(</span><span class="n">couponEventId</span><span class="p">,</span><span class="w"> </span><span class="nb">it</span><span class="p">)</span><span class="w"> </span><span class="p">}</span>
+<span class="w">    </span><span class="c1">// 조회 간격 힌트가 "남은 수량만큼 처리되면 결과가 나온다"를 계산할 수 있게 남겨 둔다</span>
+<span class="w">    </span><span class="n">batch</span><span class="o">?.</span><span class="na">let</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">couponQueueStore</span><span class="p">.</span><span class="na">saveRemainingQuantity</span><span class="p">(</span><span class="n">couponEventId</span><span class="p">,</span><span class="w"> </span><span class="nb">it</span><span class="p">.</span><span class="na">remainingQuantity</span><span class="p">)</span><span class="w"> </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+</figure>
+<ul>
+<li>일괄 발급이 통째로 실패하면(예: 한 명의 데이터 문제) 한 명씩 원자적 UPDATE 로 다시 시도합니다. 한 사람 때문에 50명이 모두 실패하지 않게 합니다.</li>
+<li>소진을 만나면 대기열을 <strong>닫습니다</strong>. 뒤에 선 사람은 DB 에 갈 필요 없이 모두 소진이므로, 다음 반복에서 <code>drainWaiting</code> 이 1,000명씩 한꺼번에 결과를 씁니다.</li>
+<li>일괄 발급이 성공하면 <strong>남은 수량을 Redis 에 남깁니다</strong>(M5). 아래 6절의 조회 간격 힌트가 &quot;언제 결과가 나올지&quot;를 추정할 때 씁니다.</li>
+</ul>
+<p><a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/main/kotlin/com/site/domain/coupon/queue/CouponQueueResult.kt" target="_blank" rel="noopener">CouponQueueResult.kt</a></p>
+<figure class="code-block"><figcaption><span class="code-lang">Kotlin</span><button type="button" class="copy-button" aria-label="코드 복사">복사</button></figcaption><div class="highlight"><pre><span></span><code><span class="cm">/**</span>
+<span class="cm"> * 대기열에서 꺼내져 처리된 결과.</span>
+<span class="cm"> * @property closesQueue 이 결과가 나오면 뒤에 선 사람도 모두 같은 결과가 되므로 대기열을 닫는다.</span>
+<span class="cm"> */</span>
+<span class="kd">enum</span><span class="w"> </span><span class="kd">class</span><span class="w"> </span><span class="nc">CouponQueueResult</span><span class="p">(</span>
+<span class="w">    </span><span class="kd">val</span><span class="w"> </span><span class="nv">closesQueue</span><span class="p">:</span><span class="w"> </span><span class="kt">Boolean</span><span class="p">,</span>
+<span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">ISSUED</span><span class="p">(</span><span class="n">closesQueue</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="kc">false</span><span class="p">),</span>
+<span class="w">    </span><span class="n">SOLD_OUT</span><span class="p">(</span><span class="n">closesQueue</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="kc">true</span><span class="p">),</span>
+<span class="w">    </span><span class="n">ENDED</span><span class="p">(</span><span class="n">closesQueue</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="kc">true</span><span class="p">),</span>
+<span class="w">    </span><span class="n">FAILED</span><span class="p">(</span><span class="n">closesQueue</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="kc">false</span><span class="p">),</span>
+<span class="p">}</span>
+</code></pre></div>
+</figure>
+<h2 id="6-사용자는-결과를-어떻게-아나">6. 사용자는 결과를 어떻게 아나 <a class="header-anchor" href="#6-사용자는-결과를-어떻게-아나">#</a></h2>
+<h3 id="조회polling와-간격-힌트">조회(polling)와 간격 힌트 <a class="header-anchor" href="#조회polling와-간격-힌트">#</a></h3>
+<p>클라이언트는 <code>GET /queue/me</code> 로 내 상태를 묻습니다. M3 에서는 모두가 0.5초마다 물었습니다. 2,000명이 12초 기다리면 HTTP 요청이 38,000건이 넘었고, 대부분 &quot;아직 대기 중&quot;이라는 같은 답이었습니다.</p>
+<p>M4 에서는 서버가 <strong>다음에 언제 물어보라</strong>고 알려 줍니다.</p>
+<p><a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/main/kotlin/com/site/domain/coupon/queue/CouponQueuePollingPolicy.kt#L8-L47" target="_blank" rel="noopener">CouponQueuePollingPolicy.kt</a></p>
+<figure class="code-block"><figcaption><span class="code-lang">Kotlin</span><button type="button" class="copy-button" aria-label="코드 복사">복사</button></figcaption><div class="highlight"><pre><span></span><code><span class="cm">/**</span>
+<span class="cm"> * 대기열 상태를 언제 다시 물어보면 되는지 알려준다. (응답의 retryAfterMillis)</span>
+<span class="cm"> *</span>
+<span class="cm"> * 모두가 0.5초마다 물으면, 1,950번째 사용자의 조회는 대부분 "아직 대기 중"이라는 같은 답을 받는다.</span>
+<span class="cm"> * 남은 예상 대기 시간의 절반 뒤에 다시 묻게 하면, 결과를 늦게 알게 되는 일 없이 조회 수가 순번에 맞게 준다.</span>
+<span class="cm"> *</span>
+<span class="cm"> * 예상 대기 시간은 "내 결과가 나오기 전까지 처리될 인원 ÷ 처리량"이다.</span>
+<span class="cm"> * 남은 수량보다 뒤에 선 사람은 내 앞사람이 다 처리될 때가 아니라 소진되는 순간 결과(소진)를 받으므로, 처리될 인원은 min(순번, 남은 수량)이다.</span>
+<span class="cm"> * 순번만 보면 쿠폰 100장에 2,000번째 사용자에게 2초 뒤에 물으라고 하는데, 실제 결과는 100명이 처리되자마자 나온다.</span>
+<span class="cm"> */</span>
+<span class="nd">@Component</span>
+<span class="kd">class</span><span class="w"> </span><span class="nc">CouponQueuePollingPolicy</span><span class="p">(</span>
+<span class="w">    </span><span class="kd">private</span><span class="w"> </span><span class="kd">val</span><span class="w"> </span><span class="nv">properties</span><span class="p">:</span><span class="w"> </span><span class="n">CouponQueuePollingProperties</span><span class="p">,</span>
+<span class="w">    </span><span class="kd">private</span><span class="w"> </span><span class="kd">val</span><span class="w"> </span><span class="nv">queueProperties</span><span class="p">:</span><span class="w"> </span><span class="n">CouponQueueProperties</span><span class="p">,</span>
+<span class="w">    </span><span class="kd">private</span><span class="w"> </span><span class="kd">val</span><span class="w"> </span><span class="nv">couponQueueStore</span><span class="p">:</span><span class="w"> </span><span class="n">CouponQueueStore</span><span class="p">,</span>
+<span class="p">)</span><span class="w"> </span><span class="p">{</span>
+
+<span class="w">    </span><span class="cm">/** 다시 물어볼 때까지 기다릴 시간(ms). 결과가 나왔거나 대기열에 없으면 null — 더 물을 필요가 없다 */</span>
+<span class="w">    </span><span class="kd">fun</span><span class="w"> </span><span class="nf">retryAfterMillis</span><span class="p">(</span><span class="n">couponEventId</span><span class="p">:</span><span class="w"> </span><span class="kt">Long</span><span class="p">,</span><span class="w"> </span><span class="n">status</span><span class="p">:</span><span class="w"> </span><span class="n">CouponQueueStatus</span><span class="p">):</span><span class="w"> </span><span class="kt">Long?</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="c1">// 남은 수량은 기다리는 사람에게만 필요하다 (Redis 조회를 아낀다)</span>
+<span class="w">        </span><span class="kd">val</span><span class="w"> </span><span class="nv">remainingQuantity</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">status</span><span class="w"> </span><span class="k">is</span><span class="w"> </span><span class="n">CouponQueueStatus</span><span class="p">.</span><span class="na">Waiting</span><span class="p">)</span><span class="w"> </span><span class="n">couponQueueStore</span><span class="p">.</span><span class="na">remainingQuantity</span><span class="p">(</span><span class="n">couponEventId</span><span class="p">)</span><span class="w"> </span><span class="k">else</span><span class="w"> </span><span class="kc">null</span>
+<span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="n">retryAfterMillis</span><span class="p">(</span><span class="n">status</span><span class="p">,</span><span class="w"> </span><span class="n">remainingQuantity</span><span class="p">)</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="cm">/** @param remainingQuantity 워커가 마지막으로 확인한 남은 수량. 모르면 null (순번만으로 추정) */</span>
+<span class="w">    </span><span class="kd">fun</span><span class="w"> </span><span class="nf">retryAfterMillis</span><span class="p">(</span><span class="n">status</span><span class="p">:</span><span class="w"> </span><span class="n">CouponQueueStatus</span><span class="p">,</span><span class="w"> </span><span class="n">remainingQuantity</span><span class="p">:</span><span class="w"> </span><span class="kt">Int?</span><span class="p">):</span><span class="w"> </span><span class="kt">Long?</span><span class="w"> </span><span class="o">=</span>
+<span class="w">        </span><span class="k">when</span><span class="w"> </span><span class="p">(</span><span class="n">status</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="n">CouponQueueStatus</span><span class="p">.</span><span class="na">Processing</span><span class="w"> </span><span class="o">-&gt;</span><span class="w"> </span><span class="n">properties</span><span class="p">.</span><span class="na">minInterval</span><span class="p">.</span><span class="na">toMillis</span><span class="p">()</span>
+<span class="w">            </span><span class="k">is</span><span class="w"> </span><span class="n">CouponQueueStatus</span><span class="p">.</span><span class="na">Waiting</span><span class="w"> </span><span class="o">-&gt;</span><span class="w"> </span><span class="p">{</span>
+<span class="w">                </span><span class="kd">val</span><span class="w"> </span><span class="nv">processedBeforeMyResult</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">remainingQuantity</span><span class="o">?.</span><span class="na">let</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">minOf</span><span class="p">(</span><span class="n">status</span><span class="p">.</span><span class="na">position</span><span class="p">,</span><span class="w"> </span><span class="nb">it</span><span class="p">.</span><span class="na">toLong</span><span class="p">())</span><span class="w"> </span><span class="p">}</span><span class="w"> </span><span class="o">?:</span><span class="w"> </span><span class="n">status</span><span class="p">.</span><span class="na">position</span>
+<span class="w">                </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">processedBeforeMyResult</span><span class="w"> </span><span class="o">&lt;=</span><span class="w"> </span><span class="n">queueProperties</span><span class="p">.</span><span class="na">batchSize</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">                    </span><span class="n">properties</span><span class="p">.</span><span class="na">minInterval</span><span class="p">.</span><span class="na">toMillis</span><span class="p">()</span><span class="w"> </span><span class="c1">// 다음 배치 안에 결과가 나온다</span>
+<span class="w">                </span><span class="p">}</span><span class="w"> </span><span class="k">else</span><span class="w"> </span><span class="p">{</span>
+<span class="w">                    </span><span class="kd">val</span><span class="w"> </span><span class="nv">expectedWaitMillis</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">processedBeforeMyResult</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="m">1</span><span class="n">_000</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="n">properties</span><span class="p">.</span><span class="na">estimatedThroughputPerSecond</span>
+<span class="w">                    </span><span class="p">(</span><span class="n">expectedWaitMillis</span><span class="w"> </span><span class="o">/</span><span class="w"> </span><span class="m">2</span><span class="p">).</span><span class="na">coerceIn</span><span class="p">(</span><span class="n">properties</span><span class="p">.</span><span class="na">minInterval</span><span class="p">.</span><span class="na">toMillis</span><span class="p">(),</span><span class="w"> </span><span class="n">properties</span><span class="p">.</span><span class="na">maxInterval</span><span class="p">.</span><span class="na">toMillis</span><span class="p">())</span>
+<span class="w">                </span><span class="p">}</span>
+<span class="w">            </span><span class="p">}</span>
+<span class="w">            </span><span class="k">is</span><span class="w"> </span><span class="n">CouponQueueStatus</span><span class="p">.</span><span class="na">Done</span><span class="p">,</span><span class="w"> </span><span class="n">CouponQueueStatus</span><span class="p">.</span><span class="na">NotInQueue</span><span class="w"> </span><span class="o">-&gt;</span><span class="w"> </span><span class="kc">null</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+</figure>
+<p>순번 1,000번이면: 예상 대기 = 1,000 ÷ 초당 500명 = 2초 → 그 절반인 1초 뒤에 다시 묻게 합니다. 0.3초~3초 사이로 제한합니다(<code>coerceIn</code>).</p>
+<p><strong>남은 수량을 보는 이유 (M5)</strong>: 처음(M4)에는 순번만 봤습니다. 100장짜리에 2,000명이 줄 서면 2,000번째 사용자는 &quot;2초 뒤에 물어보라&quot;는 힌트를 받았는데, 실제로는 100장이 금방 소진되고 나머지는 곧바로 &quot;소진&quot;으로 정리됩니다. 결과는 이미 나왔는데 다음 조회 때까지 모르는 것입니다. 그래서 100장 · 2,000명에서는 결과까지 p95 가 M3 보다 늘었습니다(1.87s → 2.38s).</p>
+<p>남은 수량보다 뒤에 선 사람은 &quot;앞사람이 다 처리될 때&quot;가 아니라 <strong>&quot;소진되는 순간&quot;</strong> 결과를 받습니다. 그때까지 처리되는 인원은 남은 수량만큼이므로, 예상 대기를 <code>min(순번, 남은 수량) ÷ 처리량</code> 으로 계산합니다.</p>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>순번 · 남은 수량</th>
+<th>순번만 볼 때</th>
+<th>남은 수량도 볼 때</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>2,000번 · 50장</td>
+<td>2초</td>
+<td>0.3초 (다음 배치에 소진)</td>
+</tr>
+<tr>
+<td>2,000번 · 1,000장</td>
+<td>2초</td>
+<td>1초</td>
+</tr>
+<tr>
+<td>1,000번 · 5,000장</td>
+<td>1초</td>
+<td>1초 (순번이 더 앞)</td>
+</tr>
+</tbody>
+</table></div>
+<p>남은 수량은 워커가 일괄 발급할 때마다 Redis 에 남깁니다(위 <code>issueBatch</code> 의 <code>saveRemainingQuantity</code>). DB 를 읽지 않고, 기다리는 사람에게만 읽습니다.</p>
+<h3 id="sse--서버가-밀어-주기">SSE — 서버가 밀어 주기 <a class="header-anchor" href="#sse--서버가-밀어-주기">#</a></h3>
+<p>조회 대신 연결 하나를 열어 두면, 상태가 바뀔 때마다 서버가 보내 줍니다(Server-Sent Events).</p>
+<p><a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/main/kotlin/com/site/presentation/coupon/stream/CouponQueueStatusStreams.kt#L12-L79" target="_blank" rel="noopener">CouponQueueStatusStreams.kt</a></p>
+<figure class="code-block"><figcaption><span class="code-lang">Kotlin</span><button type="button" class="copy-button" aria-label="코드 복사">복사</button></figcaption><div class="highlight"><pre><span></span><code><span class="cm">/**</span>
+<span class="cm"> * 대기열 상태를 SSE(Server-Sent Events)로 밀어 준다. 연결 하나로 결과가 나올 때까지 기다린다.</span>
+<span class="cm"> *</span>
+<span class="cm"> * 클라이언트가 0.5초마다 묻는 대신, 이 서버가 0.5초마다 Redis 에서 상태를 확인하고 "바뀌었을 때만" 보낸다.</span>
+<span class="cm"> * HTTP 요청·응답 왕복과 인증 처리가 연결 하나로 줄어든다. 결과(DONE)를 보내면 연결을 닫는다.</span>
+<span class="cm"> *</span>
+<span class="cm"> * 연결 목록은 서버(인스턴스)마다 따로 갖는다. 상태의 원본은 Redis 라서 서버가 여러 대여도 각자 자기 연결만 챙기면 된다.</span>
+<span class="cm"> * 연결은 스레드를 붙잡지 않는다 (Servlet 비동기 처리).</span>
+<span class="cm"> */</span>
+<span class="nd">@Component</span>
+<span class="kd">class</span><span class="w"> </span><span class="nc">CouponQueueStatusStreams</span><span class="p">(</span>
+<span class="w">    </span><span class="kd">private</span><span class="w"> </span><span class="kd">val</span><span class="w"> </span><span class="nv">couponQueueService</span><span class="p">:</span><span class="w"> </span><span class="n">CouponQueueService</span><span class="p">,</span>
+<span class="p">)</span><span class="w"> </span><span class="p">{</span>
+
+<span class="w">    </span><span class="kd">private</span><span class="w"> </span><span class="kd">val</span><span class="w"> </span><span class="nv">log</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">LoggerFactory</span><span class="p">.</span><span class="na">getLogger</span><span class="p">(</span><span class="n">javaClass</span><span class="p">)</span>
+<span class="w">    </span><span class="kd">private</span><span class="w"> </span><span class="kd">val</span><span class="w"> </span><span class="nv">subscriptions</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">ConcurrentHashMap</span><span class="o">&lt;</span><span class="n">SseEmitter</span><span class="p">,</span><span class="w"> </span><span class="n">Subscription</span><span class="o">&gt;</span><span class="p">()</span>
+
+<span class="w">    </span><span class="kd">private</span><span class="w"> </span><span class="kd">class</span><span class="w"> </span><span class="nc">Subscription</span><span class="p">(</span>
+<span class="w">        </span><span class="kd">val</span><span class="w"> </span><span class="nv">couponEventId</span><span class="p">:</span><span class="w"> </span><span class="kt">Long</span><span class="p">,</span>
+<span class="w">        </span><span class="kd">val</span><span class="w"> </span><span class="nv">memberId</span><span class="p">:</span><span class="w"> </span><span class="kt">Long</span><span class="p">,</span>
+<span class="w">    </span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="nd">@Volatile</span>
+<span class="w">        </span><span class="kd">var</span><span class="w"> </span><span class="nv">lastSent</span><span class="p">:</span><span class="w"> </span><span class="n">CouponQueueStatus?</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="kc">null</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="kd">fun</span><span class="w"> </span><span class="nf">subscribe</span><span class="p">(</span><span class="n">couponEventId</span><span class="p">:</span><span class="w"> </span><span class="kt">Long</span><span class="p">,</span><span class="w"> </span><span class="n">memberId</span><span class="p">:</span><span class="w"> </span><span class="kt">Long</span><span class="p">):</span><span class="w"> </span><span class="n">SseEmitter</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="kd">val</span><span class="w"> </span><span class="nv">emitter</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">SseEmitter</span><span class="p">(</span><span class="n">TIMEOUT</span><span class="p">.</span><span class="na">toMillis</span><span class="p">())</span>
+<span class="w">        </span><span class="kd">val</span><span class="w"> </span><span class="nv">subscription</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Subscription</span><span class="p">(</span><span class="n">couponEventId</span><span class="p">,</span><span class="w"> </span><span class="n">memberId</span><span class="p">)</span>
+<span class="w">        </span><span class="n">subscriptions</span><span class="o">[</span><span class="n">emitter</span><span class="o">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">subscription</span>
+
+<span class="w">        </span><span class="n">emitter</span><span class="p">.</span><span class="na">onCompletion</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">subscriptions</span><span class="p">.</span><span class="na">remove</span><span class="p">(</span><span class="n">emitter</span><span class="p">)</span><span class="w"> </span><span class="p">}</span>
+<span class="w">        </span><span class="n">emitter</span><span class="p">.</span><span class="na">onTimeout</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="c1">// 클라이언트가 다시 연결한다</span>
+<span class="w">            </span><span class="n">subscriptions</span><span class="p">.</span><span class="na">remove</span><span class="p">(</span><span class="n">emitter</span><span class="p">)</span>
+<span class="w">            </span><span class="n">emitter</span><span class="p">.</span><span class="na">complete</span><span class="p">()</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="w">        </span><span class="n">emitter</span><span class="p">.</span><span class="na">onError</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">subscriptions</span><span class="p">.</span><span class="na">remove</span><span class="p">(</span><span class="n">emitter</span><span class="p">)</span><span class="w"> </span><span class="p">}</span>
+
+<span class="w">        </span><span class="n">push</span><span class="p">(</span><span class="n">emitter</span><span class="p">,</span><span class="w"> </span><span class="n">subscription</span><span class="p">)</span><span class="w"> </span><span class="c1">// 연결하자마자 현재 상태를 보낸다</span>
+<span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="n">emitter</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="cm">/** 연결된 모든 사용자의 상태를 확인해, 바뀐 사람에게만 보낸다. (스케줄러) */</span>
+<span class="w">    </span><span class="kd">fun</span><span class="w"> </span><span class="nf">pushAll</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">subscriptions</span><span class="p">.</span><span class="na">forEach</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="p">(</span><span class="n">emitter</span><span class="p">,</span><span class="w"> </span><span class="n">subscription</span><span class="p">)</span><span class="w"> </span><span class="o">-&gt;</span><span class="w"> </span><span class="n">push</span><span class="p">(</span><span class="n">emitter</span><span class="p">,</span><span class="w"> </span><span class="n">subscription</span><span class="p">)</span><span class="w"> </span><span class="p">}</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="kd">fun</span><span class="w"> </span><span class="nf">connectionCount</span><span class="p">():</span><span class="w"> </span><span class="kt">Int</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">subscriptions</span><span class="p">.</span><span class="na">size</span>
+
+<span class="w">    </span><span class="kd">private</span><span class="w"> </span><span class="kd">fun</span><span class="w"> </span><span class="nf">push</span><span class="p">(</span><span class="n">emitter</span><span class="p">:</span><span class="w"> </span><span class="n">SseEmitter</span><span class="p">,</span><span class="w"> </span><span class="n">subscription</span><span class="p">:</span><span class="w"> </span><span class="n">Subscription</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="kd">val</span><span class="w"> </span><span class="nv">status</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">couponQueueService</span><span class="p">.</span><span class="na">getStatus</span><span class="p">(</span><span class="n">subscription</span><span class="p">.</span><span class="na">couponEventId</span><span class="p">,</span><span class="w"> </span><span class="n">subscription</span><span class="p">.</span><span class="na">memberId</span><span class="p">)</span>
+<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">status</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="n">subscription</span><span class="p">.</span><span class="na">lastSent</span><span class="p">)</span><span class="w"> </span><span class="k">return</span>
+<span class="w">        </span><span class="n">subscription</span><span class="p">.</span><span class="na">lastSent</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">status</span>
+
+<span class="w">        </span><span class="k">try</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="n">emitter</span><span class="p">.</span><span class="na">send</span><span class="p">(</span><span class="n">SseEmitter</span><span class="p">.</span><span class="na">event</span><span class="p">().</span><span class="na">name</span><span class="p">(</span><span class="n">EVENT_NAME</span><span class="p">).</span><span class="na">data</span><span class="p">(</span><span class="n">status</span><span class="p">.</span><span class="na">toResponse</span><span class="p">()))</span>
+<span class="w">            </span><span class="c1">// 결과가 나왔거나 대기열에 없으면 더 보낼 것이 없다.</span>
+<span class="w">            </span><span class="c1">// 목록에서 직접 뺀다. 연결하자마자 닫는 경우 onCompletion 콜백이 언제 불리는지는 서블릿 컨테이너마다 다르다.</span>
+<span class="w">            </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">status</span><span class="w"> </span><span class="k">is</span><span class="w"> </span><span class="n">CouponQueueStatus</span><span class="p">.</span><span class="na">Done</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="n">status</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="n">CouponQueueStatus</span><span class="p">.</span><span class="na">NotInQueue</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">                </span><span class="n">subscriptions</span><span class="p">.</span><span class="na">remove</span><span class="p">(</span><span class="n">emitter</span><span class="p">)</span>
+<span class="w">                </span><span class="n">emitter</span><span class="p">.</span><span class="na">complete</span><span class="p">()</span>
+<span class="w">            </span><span class="p">}</span>
+<span class="w">        </span><span class="p">}</span><span class="w"> </span><span class="k">catch</span><span class="w"> </span><span class="p">(</span><span class="n">e</span><span class="p">:</span><span class="w"> </span><span class="n">Exception</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="c1">// 클라이언트가 이미 끊은 경우</span>
+<span class="w">            </span><span class="n">log</span><span class="p">.</span><span class="na">debug</span><span class="p">(</span><span class="s">"대기열 상태 전송 실패, 연결을 정리합니다. {}"</span><span class="p">,</span><span class="w"> </span><span class="n">e</span><span class="p">.</span><span class="na">message</span><span class="p">)</span>
+<span class="w">            </span><span class="n">subscriptions</span><span class="p">.</span><span class="na">remove</span><span class="p">(</span><span class="n">emitter</span><span class="p">)</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="w">    </span><span class="p">}</span>
+</code></pre></div>
+</figure>
+<ul>
+<li><code>SseEmitter</code> 를 돌려주면 요청 스레드는 바로 반환되고, 응답 연결만 열린 채 남습니다(Servlet 비동기).</li>
+<li><code>status == subscription.lastSent</code>: data class·data object 라 <code>==</code> 가 값 비교입니다. 바뀌지 않았으면 보내지 않습니다.</li>
+<li>SSE 를 쓰려고 보안 설정에 <code>DispatcherType.ASYNC</code> 허용을 추가했습니다. (<a href="06-auth.html">6장</a>)</li>
+<li>브라우저 기본 <code>EventSource</code> 는 <code>Authorization</code> 헤더를 못 붙여서, fetch 기반 SSE 클라이언트가 필요합니다. (<a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/main/kotlin/com/site/presentation/coupon/api/CouponController.kt" target="_blank" rel="noopener">CouponController</a> 주석)</li>
+<li>줄을 선 <strong>뒤에</strong> 연결해야 합니다. 먼저 연결하면 <code>NOT_IN_QUEUE</code> 를 받고 바로 닫힙니다.</li>
+</ul>
+<h2 id="7-숫자로-본-효과">7. 숫자로 본 효과 <a class="header-anchor" href="#7-숫자로-본-효과">#</a></h2>
+<p><a href="https://github.com/RosieOh/Kopring_Core/blob/main/load-test/README.md" target="_blank" rel="noopener">load-test/README.md</a> 의 M3 → M4 비교입니다. (결과까지 중앙값 / p95 · 총 HTTP 요청)</p>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>쿠폰 · 동시 사용자</th>
+<th>M3: 한 명씩 발급 + 0.5초 고정 조회</th>
+<th>M4: 배치 발급 + 조회 간격 힌트</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1,000장 · 2,000명</td>
+<td>12.19s / 12.69s · 38,412건</td>
+<td><strong>1.86s / 2.24s · 6,163건</strong></td>
+</tr>
+<tr>
+<td>1,000장 · 5,000명</td>
+<td>4,234명 60초 안에 결과 못 받음 · 384,994건</td>
+<td><strong>5.59s / 7.12s, 시간 초과 0 · 22,033건</strong></td>
+</tr>
+</tbody>
+</table></div>
+<p>5,000명에서 M3 는 무너졌습니다. 0.5초마다 묻는 5,000명이 초당 수천 건의 조회를 만들고, 그 조회가 같은 기계에서 워커와 자원을 다퉈 발급이 더 느려지는 악순환이 생겼습니다. <strong>폴링 비용은 단순히 &quot;요청이 많다&quot;에서 끝나지 않고 본 작업을 느리게 만듭니다.</strong></p>
+<p>모든 실행에서 DB 커넥션 대기는 0 이었습니다. 대기열이 DB 를 지킨다는 목적은 처음부터 달성했고, M4 는 그 대가(느린 결과, 많은 조회)를 줄였습니다.</p>
+<h2 id="흔한-실수">흔한 실수 <a class="header-anchor" href="#흔한-실수">#</a></h2>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>실수</th>
+<th>결과</th>
+<th>대신</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>여러 Redis 명령으로 상태를 옮긴다</td>
+<td>사이에 끼어든 요청·장애로 중간 상태가 남는다</td>
+<td>Lua 스크립트 하나로</td>
+</tr>
+<tr>
+<td>꺼내면서 지운다 (처리 중 상태 없음)</td>
+<td>처리하던 워커가 죽으면 회원이 사라진다</td>
+<td>처리 중 + lease</td>
+</tr>
+<tr>
+<td>재처리되는 로직이 멱등이 아니다</td>
+<td>두 번 발급</td>
+<td>이미 처리된 것을 확인하고 같은 결과를 돌려준다</td>
+</tr>
+<tr>
+<td>같은 이벤트의 키가 다른 슬롯에 있다</td>
+<td>Redis Cluster 에서 Lua 가 실패한다</td>
+<td>해시 태그 <code>{id}</code></td>
+</tr>
+<tr>
+<td>키에 TTL 이 없다</td>
+<td>끝난 이벤트의 키가 영원히 남는다</td>
+<td><code>EXPIRE</code></td>
+</tr>
+<tr>
+<td>모든 클라이언트가 짧은 고정 간격으로 묻는다</td>
+<td>요청 폭증, 본 작업까지 느려진다</td>
+<td>서버가 간격을 알려 주거나 SSE</td>
+</tr>
+</tbody>
+</table></div>
+<h2 id="직접-해보기">직접 해보기 <a class="header-anchor" href="#직접-해보기">#</a></h2>
+<ol>
+<li><a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/test/kotlin/com/site/domain/coupon/queue/CouponQueueTest.kt" target="_blank" rel="noopener">CouponQueueTest</a> 의 &quot;처리하던 워커가 죽어도 lease 가 지나면...&quot; 테스트를 읽고, 워커가 죽은 상황을 어떻게 만들었는지 설명해 보세요.</li>
+<li><code>CouponQueuePollingPolicy.retryAfterMillis</code> 를 <code>min(순번, 남은 수량)</code> 기준으로 바꾸려면 남은 수량을 어디서 얻어야 할까요? 요청마다 DB 를 읽지 않으려면?</li>
+<li>ENQUEUE 스크립트에서 &quot;마감 확인(<code>EXISTS closed</code>)&quot;을 &quot;결과 확인(<code>HEXISTS result</code>)&quot;보다 먼저 하면, 이미 쿠폰을 받은 사람이 다시 줄을 설 때 어떤 응답을 받게 되나요?</li>
+<li>워커를 서버 두 대에서 동시에 돌리면 무엇이 지켜지고 무엇이 느슨해지나요? (힌트: 수량, 순서)</li>
+</ol>
+<p>다음 장: <a href="10-testing.html">10장. 테스트</a></p>
+
+</article>
+<p class="source-link"><a href="https://github.com/RosieOh/Kopring_Core/blob/main/docs/09-redis-queue.md" target="_blank" rel="noopener">이 장의 원본 Markdown 보기</a></p>
+<nav class="pager" aria-label="장 이동"><a class="pager-prev" href="08-async-and-reliability.html"><span>이전</span>8장. 비동기와 신뢰성</a><a class="pager-next" href="10-testing.html"><span>다음</span>10장. 테스트</a></nav>
+</main>
+<nav class="page-toc" aria-label="이 장의 목차"><p class="page-toc-title">이 장에서</p><ol><li class="toc-level-2"><a href="#1-왜-대기열인가">1. 왜 대기열인가</a></li>
+<li class="toc-level-2"><a href="#2-redis-자료구조와-키">2. Redis 자료구조와 키</a></li>
+<li class="toc-level-2"><a href="#3-상태-전이">3. 상태 전이</a></li>
+<li class="toc-level-2"><a href="#4-lua-스크립트--여러-명령을-하나처럼">4. Lua 스크립트 — 여러 명령을 하나처럼</a></li>
+<li class="toc-level-3"><a href="#꺼내기--대기에서-처리-중으로">꺼내기 — 대기에서 처리 중으로</a></li>
+<li class="toc-level-3"><a href="#해시-태그-id">해시 태그 {id}</a></li>
+<li class="toc-level-2"><a href="#5-워커--앞에서부터-50명씩">5. 워커 — 앞에서부터 50명씩</a></li>
+<li class="toc-level-3"><a href="#일괄-발급--50명에-커밋-한-번">일괄 발급 — 50명에 커밋 한 번</a></li>
+<li class="toc-level-3"><a href="#멱등--두-번-처리해도-같은-결과">멱등 — 두 번 처리해도 같은 결과</a></li>
+<li class="toc-level-3"><a href="#결과-기록과-마감">결과 기록과 마감</a></li>
+<li class="toc-level-2"><a href="#6-사용자는-결과를-어떻게-아나">6. 사용자는 결과를 어떻게 아나</a></li>
+<li class="toc-level-3"><a href="#조회polling와-간격-힌트">조회(polling)와 간격 힌트</a></li>
+<li class="toc-level-3"><a href="#sse--서버가-밀어-주기">SSE — 서버가 밀어 주기</a></li>
+<li class="toc-level-2"><a href="#7-숫자로-본-효과">7. 숫자로 본 효과</a></li>
+<li class="toc-level-2"><a href="#흔한-실수">흔한 실수</a></li>
+<li class="toc-level-2"><a href="#직접-해보기">직접 해보기</a></li></ol></nav>
+</div>
+</body>
+</html>

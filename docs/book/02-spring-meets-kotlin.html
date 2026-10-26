@@ -1,0 +1,447 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>2장. 스프링이 Kotlin 을 만나면 — 코프링 교재</title>
+<meta name="description" content="선착순 쿠폰 코드로 배우는 Kotlin + Spring Boot">
+<script>try{var t=localStorage.getItem("book-theme");if(t)document.documentElement.dataset.theme=t;}catch(e){}</script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+<link rel="stylesheet" href="assets/book.css">
+<link rel="stylesheet" href="assets/highlight.css">
+<script src="assets/book.js" defer></script>
+</head>
+<body>
+<a class="skip-link" href="#content">본문으로 건너뛰기</a>
+<header class="topbar">
+  <button type="button" class="menu-button" aria-label="장 목록 열기" aria-expanded="false" aria-controls="sidebar">목차</button>
+  <a class="topbar-title" href="index.html">코프링 교재</a>
+  <button type="button" class="theme-button" aria-label="밝은 화면과 어두운 화면 바꾸기">화면</button>
+</header>
+<div class="layout">
+<aside class="sidebar" id="sidebar">
+  <a class="sidebar-title" href="index.html">코프링 교재<small>선착순 쿠폰으로 배우는 Kotlin + Spring Boot</small></a>
+  <nav aria-label="장 목록"><ol class="chapter-list">
+<li><a href="index.html">처음에 — 읽는 법과 목차</a></li>
+<li><a href="01-kotlin-basics.html">1장. Kotlin 기초</a></li>
+<li><a href="02-spring-meets-kotlin.html" aria-current="page">2장. 스프링이 Kotlin 을 만나면</a></li>
+<li><a href="03-architecture.html">3장. 프로젝트 구조와 계층</a></li>
+<li><a href="04-jpa-with-kotlin.html">4장. JPA 엔티티를 Kotlin 으로</a></li>
+<li><a href="05-web-and-errors.html">5장. 웹 계층과 예외 처리</a></li>
+<li><a href="06-auth.html">6장. 인증</a></li>
+<li><a href="07-concurrency.html">7장. 동시성 제어</a></li>
+<li><a href="08-async-and-reliability.html">8장. 비동기와 신뢰성</a></li>
+<li><a href="09-redis-queue.html">9장. Redis 대기열</a></li>
+<li><a href="10-testing.html">10장. 테스트</a></li>
+<li><a href="11-observability-and-load-test.html">11장. 관측과 부하 테스트</a></li>
+<li><a href="12-next-steps-and-exercises.html">12장. 다음 공부와 연습 문제</a></li>
+<li><a href="13-virtual-threads-and-backpressure.html">13장. 심화: 가상 스레드와 몰림 대응</a></li>
+  </ol></nav>
+</aside>
+<main id="content" class="content">
+<article class="markdown">
+<h1 id="2장-스프링이-kotlin-을-만나면">2장. 스프링이 Kotlin 을 만나면 <a class="header-anchor" href="#2장-스프링이-kotlin-을-만나면">#</a></h1>
+<p><strong>한 줄 요약</strong>: Spring 과 JPA 는 Java 를 기준으로 만들어졌습니다. Kotlin 의 &quot;기본이 final&quot;, &quot;기본 생성자 없음&quot;이 이들과 부딪히는 지점을 Gradle 플러그인 두 개가 메워 줍니다.</p>
+<h2 id="1-스프링이-하는-일-아주-짧게">1. 스프링이 하는 일, 아주 짧게 <a class="header-anchor" href="#1-스프링이-하는-일-아주-짧게">#</a></h2>
+<p>Spring 은 객체를 대신 만들고 서로 연결해 주는 <strong>컨테이너</strong>입니다.</p>
+<ul>
+<li><code>@Service</code>, <code>@Component</code>, <code>@Repository</code>, <code>@RestController</code> 가 붙은 클래스를 찾아 객체(빈, bean)로 만든다.</li>
+<li>생성자에 필요한 다른 빈을 찾아 넣어 준다. (의존성 주입)</li>
+<li><code>@Transactional</code>, <code>@Async</code>, <code>@DistributedLock</code> 같은 애너테이션이 붙은 메서드 앞뒤에 기능을 끼워 넣는다. 이때 <strong>원래 클래스를 상속한 프록시 객체</strong>를 만든다.</li>
+</ul>
+<p>마지막 줄이 Kotlin 과 부딪히는 첫 번째 지점입니다.</p>
+<h2 id="2-문제-1--kotlin-클래스는-기본이-final">2. 문제 1 — Kotlin 클래스는 기본이 <code>final</code> <a class="header-anchor" href="#2-문제-1--kotlin-클래스는-기본이-final">#</a></h2>
+<p>Kotlin 클래스와 메서드는 <code>open</code> 을 붙이지 않으면 상속할 수 없습니다. 그런데 Spring 은 <code>@Transactional</code> 을 처리하려고 클래스를 상속한 프록시(CGLIB)를 만듭니다. 상속이 막혀 있으면 프록시를 만들 수 없습니다.</p>
+<p>JPA 도 마찬가지입니다. 연관 엔티티를 늦게 불러오는(lazy loading) 프록시가 엔티티를 상속합니다.</p>
+<p>해결은 플러그인이 대신 <code>open</code> 을 붙여 주는 것입니다.</p>
+<p><a href="https://github.com/RosieOh/Kopring_Core/blob/main/build.gradle.kts#L1-L15" target="_blank" rel="noopener">build.gradle.kts</a></p>
+<figure class="code-block"><figcaption><span class="code-lang">Kotlin</span><button type="button" class="copy-button" aria-label="코드 복사">복사</button></figcaption><div class="highlight"><pre><span></span><code><span class="n">plugins</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">kotlin</span><span class="p">(</span><span class="s">"jvm"</span><span class="p">)</span><span class="w"> </span><span class="n">version</span><span class="w"> </span><span class="s">"2.1.10"</span>
+<span class="w">    </span><span class="n">kotlin</span><span class="p">(</span><span class="s">"plugin.spring"</span><span class="p">)</span><span class="w"> </span><span class="n">version</span><span class="w"> </span><span class="s">"2.1.10"</span>
+<span class="w">    </span><span class="n">kotlin</span><span class="p">(</span><span class="s">"plugin.jpa"</span><span class="p">)</span><span class="w"> </span><span class="n">version</span><span class="w"> </span><span class="s">"2.1.10"</span>
+<span class="w">    </span><span class="n">id</span><span class="p">(</span><span class="s">"org.springframework.boot"</span><span class="p">)</span><span class="w"> </span><span class="n">version</span><span class="w"> </span><span class="s">"3.4.1"</span>
+<span class="w">    </span><span class="n">id</span><span class="p">(</span><span class="s">"io.spring.dependency-management"</span><span class="p">)</span><span class="w"> </span><span class="n">version</span><span class="w"> </span><span class="s">"1.1.7"</span>
+<span class="w">    </span><span class="n">id</span><span class="p">(</span><span class="s">"org.sonarqube"</span><span class="p">)</span><span class="w"> </span><span class="n">version</span><span class="w"> </span><span class="s">"6.0.1.5171"</span>
+<span class="w">    </span><span class="n">id</span><span class="p">(</span><span class="s">"org.jlleitschuh.gradle.ktlint"</span><span class="p">)</span><span class="w"> </span><span class="n">version</span><span class="w"> </span><span class="s">"12.1.2"</span>
+<span class="p">}</span>
+
+<span class="n">allOpen</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">annotation</span><span class="p">(</span><span class="s">"jakarta.persistence.Entity"</span><span class="p">)</span>
+<span class="w">    </span><span class="n">annotation</span><span class="p">(</span><span class="s">"jakarta.persistence.MappedSuperclass"</span><span class="p">)</span>
+<span class="w">    </span><span class="n">annotation</span><span class="p">(</span><span class="s">"jakarta.persistence.Embeddable"</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></div>
+</figure>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>설정</th>
+<th>하는 일</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>kotlin(&quot;plugin.spring&quot;)</code></td>
+<td><code>@Component</code>(와 그것을 품은 <code>@Service</code>, <code>@Configuration</code> 등), <code>@Transactional</code>, <code>@Async</code> 가 붙은 클래스를 자동으로 <code>open</code> 으로 만든다</td>
+</tr>
+<tr>
+<td><code>allOpen { annotation(...) }</code></td>
+<td>JPA 엔티티·임베디드 타입도 <code>open</code> 으로 만든다 (지연 로딩 프록시용)</td>
+</tr>
+<tr>
+<td><code>kotlin(&quot;plugin.jpa&quot;)</code></td>
+<td>엔티티에 <strong>인자 없는 생성자</strong>를 만들어 준다 (다음 절)</td>
+</tr>
+</tbody>
+</table></div>
+<p>그래서 이 프로젝트 코드 어디에도 <code>open class</code> 가 없습니다.</p>
+<h2 id="3-문제-2--jpa-는-인자-없는-생성자가-필요하다">3. 문제 2 — JPA 는 인자 없는 생성자가 필요하다 <a class="header-anchor" href="#3-문제-2--jpa-는-인자-없는-생성자가-필요하다">#</a></h2>
+<p>JPA 는 DB 에서 행을 읽어 올 때 <strong>빈 객체를 먼저 만들고 필드를 채웁니다.</strong> 그러려면 인자 없는 생성자가 있어야 합니다. Kotlin 클래스는 주 생성자에 파라미터가 있으면 인자 없는 생성자가 없습니다.</p>
+<p><code>kotlin(&quot;plugin.jpa&quot;)</code> 가 코드에서는 보이지 않는 인자 없는 생성자를 만들어 줍니다. 여기에 재미있는 결과가 하나 따라옵니다.</p>
+<p><a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/main/kotlin/com/site/domain/coupon/entity/Discount.kt#L12-L32" target="_blank" rel="noopener">Discount.kt</a></p>
+<figure class="code-block"><figcaption><span class="code-lang">Kotlin</span><button type="button" class="copy-button" aria-label="코드 복사">복사</button></figcaption><div class="highlight"><pre><span></span><code><span class="cm">/**</span>
+<span class="cm"> * 할인 정책 값 객체. coupon_event 테이블의 컬럼 두 개(discount_type, discount_value)로 저장된다.</span>
+<span class="cm"> *</span>
+<span class="cm"> * init 블록은 우리가 생성자를 호출할 때만 실행된다. (JPA 가 DB 에서 읽어 올 때 쓰는 기본 생성자는</span>
+<span class="cm"> * kotlin("plugin.jpa") 가 만든 것이라 init 을 거치지 않는다) 그래서 "잘못된 값으로는 만들 수조차 없는" 객체가 된다.</span>
+<span class="cm"> */</span>
+<span class="nd">@Embeddable</span>
+<span class="kd">class</span><span class="w"> </span><span class="nc">Discount</span><span class="p">(</span>
+<span class="w">    </span><span class="nd">@Enumerated</span><span class="p">(</span><span class="n">EnumType</span><span class="p">.</span><span class="na">STRING</span><span class="p">)</span>
+<span class="w">    </span><span class="nd">@JdbcTypeCode</span><span class="p">(</span><span class="n">SqlTypes</span><span class="p">.</span><span class="na">VARCHAR</span><span class="p">)</span>
+<span class="w">    </span><span class="nd">@Column</span><span class="p">(</span><span class="n">name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">"discount_type"</span><span class="p">,</span><span class="w"> </span><span class="n">nullable</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="kc">false</span><span class="p">,</span><span class="w"> </span><span class="n">length</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="m">20</span><span class="p">)</span>
+<span class="w">    </span><span class="kd">val</span><span class="w"> </span><span class="nv">type</span><span class="p">:</span><span class="w"> </span><span class="n">DiscountType</span><span class="p">,</span>
+
+<span class="w">    </span><span class="nd">@Column</span><span class="p">(</span><span class="n">name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">"discount_value"</span><span class="p">,</span><span class="w"> </span><span class="n">nullable</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="kc">false</span><span class="p">)</span>
+<span class="w">    </span><span class="kd">val</span><span class="w"> </span><span class="nv">value</span><span class="p">:</span><span class="w"> </span><span class="kt">Int</span><span class="p">,</span>
+<span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="k">init</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="o">!</span><span class="n">type</span><span class="p">.</span><span class="na">isValidValue</span><span class="p">(</span><span class="n">value</span><span class="p">))</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="k">throw</span><span class="w"> </span><span class="n">ServiceException</span><span class="p">(</span><span class="n">ErrorCode</span><span class="p">.</span><span class="na">INVALID_DISCOUNT_VALUE</span><span class="p">)</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="w">    </span><span class="p">}</span>
+</code></pre></div>
+</figure>
+<ul>
+<li>코드에서 <code>Discount(...)</code> 를 부르면 <code>init</code> 검사를 거친다 → 잘못된 할인은 만들 수 없다.</li>
+<li>JPA 가 DB 에서 읽을 때는 <code>init</code> 을 거치지 않는다 → 이미 저장된 데이터 때문에 조회가 깨지지 않는다.</li>
+</ul>
+<h2 id="4-생성자-주입--autowired-가-없는-이유">4. 생성자 주입 — <code>@Autowired</code> 가 없는 이유 <a class="header-anchor" href="#4-생성자-주입--autowired-가-없는-이유">#</a></h2>
+<p><a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/main/kotlin/com/site/domain/coupon/service/CouponEventService.kt#L15-L20" target="_blank" rel="noopener">CouponEventService.kt</a></p>
+<figure class="code-block"><figcaption><span class="code-lang">Kotlin</span><button type="button" class="copy-button" aria-label="코드 복사">복사</button></figcaption><div class="highlight"><pre><span></span><code><span class="nd">@Service</span>
+<span class="nd">@Transactional</span><span class="p">(</span><span class="n">readOnly</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="kc">true</span><span class="p">)</span>
+<span class="kd">class</span><span class="w"> </span><span class="nc">CouponEventService</span><span class="p">(</span>
+<span class="w">    </span><span class="kd">private</span><span class="w"> </span><span class="kd">val</span><span class="w"> </span><span class="nv">couponEventRepository</span><span class="p">:</span><span class="w"> </span><span class="n">CouponEventRepository</span><span class="p">,</span>
+<span class="w">    </span><span class="kd">private</span><span class="w"> </span><span class="kd">val</span><span class="w"> </span><span class="nv">clock</span><span class="p">:</span><span class="w"> </span><span class="n">Clock</span><span class="p">,</span>
+<span class="p">)</span><span class="w"> </span><span class="p">{</span>
+</code></pre></div>
+</figure>
+<ul>
+<li>주 생성자의 <code>private val</code> 파라미터가 곧 필드입니다.</li>
+<li>생성자가 하나뿐이면 Spring 은 <code>@Autowired</code> 없이 그 생성자로 주입합니다.</li>
+<li>필드가 <code>val</code> 이라 주입된 뒤 바뀌지 않고, 테스트에서는 <code>CouponEventService(가짜리포지토리, 고정Clock)</code> 처럼 그냥 생성자를 부르면 됩니다.</li>
+</ul>
+<p>테스트 클래스는 예외입니다. JUnit 이 테스트 객체를 만들기 때문에 생성자에 <code>@Autowired</code> 를 명시합니다.</p>
+<figure class="code-block"><figcaption><span class="code-lang">Kotlin</span><button type="button" class="copy-button" aria-label="코드 복사">복사</button></figcaption><div class="highlight"><pre><span></span><code><span class="c1">// CouponIssueConcurrencyTest.kt</span>
+<span class="nd">@IntegrationTest</span>
+<span class="kd">class</span><span class="w"> </span><span class="nc">CouponIssueConcurrencyTest</span><span class="w"> </span><span class="nd">@Autowired</span><span class="w"> </span><span class="k">constructor</span><span class="p">(</span>
+<span class="w">    </span><span class="kd">private</span><span class="w"> </span><span class="kd">val</span><span class="w"> </span><span class="nv">couponIssueService</span><span class="p">:</span><span class="w"> </span><span class="n">CouponIssueService</span><span class="p">,</span>
+</code></pre></div>
+</figure>
+<h2 id="5-설정값을-타입으로--configurationproperties--data-class">5. 설정값을 타입으로 — <code>@ConfigurationProperties</code> + <code>data class</code> <a class="header-anchor" href="#5-설정값을-타입으로--configurationproperties--data-class">#</a></h2>
+<p><code>application.properties</code> 의 값을 불변 객체로 받습니다.</p>
+<p><a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/main/kotlin/com/site/domain/coupon/queue/CouponQueueProperties.kt" target="_blank" rel="noopener">CouponQueueProperties.kt</a></p>
+<figure class="code-block"><figcaption><span class="code-lang">Kotlin</span><button type="button" class="copy-button" aria-label="코드 복사">복사</button></figcaption><div class="highlight"><pre><span></span><code><span class="cm">/**</span>
+<span class="cm"> * @property batchSize 워커가 한 번에 대기열에서 꺼내 발급하는 인원. (주기 × 배치 크기 = 초당 처리량의 상한)</span>
+<span class="cm"> * @property keyTtl 대기열 관련 Redis 키의 만료 시간. 이벤트가 끝난 뒤 키가 영원히 남지 않게 한다.</span>
+<span class="cm"> * @property processingLease 꺼낸 회원을 처리 중으로 잡아 두는 시간. 이 시간이 지나도록 결과가 없으면</span>
+<span class="cm"> *   처리하던 워커가 죽은 것으로 보고 다음 주기에 다시 처리한다. 한 배치 처리 시간보다 넉넉해야 한다.</span>
+<span class="cm"> * @property maxBusyTime 줄이 남아 있으면 쉬지 않고 다음 배치를 이어서 처리하되, 한 이벤트에 이 시간까지만 쓴다.</span>
+<span class="cm"> *   너무 길면 다른 이벤트의 대기열이나 같은 스케줄러를 쓰는 작업이 밀린다.</span>
+<span class="cm"> */</span>
+<span class="nd">@ConfigurationProperties</span><span class="p">(</span><span class="n">prefix</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">"coupon.queue"</span><span class="p">)</span>
+<span class="kd">data</span><span class="w"> </span><span class="kd">class</span><span class="w"> </span><span class="nc">CouponQueueProperties</span><span class="p">(</span>
+<span class="w">    </span><span class="kd">val</span><span class="w"> </span><span class="nv">batchSize</span><span class="p">:</span><span class="w"> </span><span class="kt">Long</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="m">50</span><span class="p">,</span>
+<span class="w">    </span><span class="kd">val</span><span class="w"> </span><span class="nv">keyTtl</span><span class="p">:</span><span class="w"> </span><span class="n">Duration</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Duration</span><span class="p">.</span><span class="na">ofDays</span><span class="p">(</span><span class="m">1</span><span class="p">),</span>
+<span class="w">    </span><span class="kd">val</span><span class="w"> </span><span class="nv">processingLease</span><span class="p">:</span><span class="w"> </span><span class="n">Duration</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Duration</span><span class="p">.</span><span class="na">ofSeconds</span><span class="p">(</span><span class="m">30</span><span class="p">),</span>
+<span class="w">    </span><span class="kd">val</span><span class="w"> </span><span class="nv">maxBusyTime</span><span class="p">:</span><span class="w"> </span><span class="n">Duration</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Duration</span><span class="p">.</span><span class="na">ofSeconds</span><span class="p">(</span><span class="m">1</span><span class="p">),</span>
+<span class="p">)</span>
+</code></pre></div>
+</figure>
+<ul>
+<li>생성자 파라미터의 <strong>기본값이 곧 설정 기본값</strong>입니다. properties 에 없으면 기본값을 씁니다.</li>
+<li><code>Duration</code> 은 <code>30s</code>, <code>1d</code>, <code>300ms</code> 같은 문자열을 Spring 이 알아서 바꿔 줍니다. (<a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/main/kotlin/com/site/infrastructure/security/jwt/JwtProperties.kt" target="_blank" rel="noopener">JwtProperties.kt</a> 주석: <code>jwt.access-token-expiration=30m → Duration.ofMinutes(30)</code>)</li>
+<li>이름은 케밥 표기로 씁니다. <code>coupon.queue.batch-size=100</code> → <code>batchSize</code></li>
+<li>enum 도 됩니다. <code>coupon.issue.direct-strategy=distributed-lock</code> → <code>DirectIssueStrategy.DISTRIBUTED_LOCK</code> (<a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/main/kotlin/com/site/domain/coupon/service/CouponIssueProperties.kt" target="_blank" rel="noopener">CouponIssueProperties.kt</a>)</li>
+</ul>
+<p>이 클래스들은 <code>@Component</code> 없이도 빈이 됩니다. 시작 클래스에 <code>@ConfigurationPropertiesScan</code> 이 있기 때문입니다.</p>
+<p><a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/main/kotlin/com/site/SiteApplication.kt" target="_blank" rel="noopener">SiteApplication.kt</a></p>
+<figure class="code-block"><figcaption><span class="code-lang">Kotlin</span><button type="button" class="copy-button" aria-label="코드 복사">복사</button></figcaption><div class="highlight"><pre><span></span><code><span class="c1">// JWT 로 직접 인증하므로 Spring Boot 기본 인메모리 사용자(+ 랜덤 비밀번호 로그)는 끈다</span>
+<span class="nd">@SpringBootApplication</span><span class="p">(</span><span class="n">exclude</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">[</span><span class="n">UserDetailsServiceAutoConfiguration</span><span class="o">::</span><span class="n">class</span><span class="o">]</span><span class="p">)</span>
+<span class="nd">@ConfigurationPropertiesScan</span>
+<span class="kd">class</span><span class="w"> </span><span class="nc">SiteApplication</span>
+
+<span class="kd">fun</span><span class="w"> </span><span class="nf">main</span><span class="p">(</span><span class="n">args</span><span class="p">:</span><span class="w"> </span><span class="n">Array</span><span class="o">&lt;</span><span class="kt">String</span><span class="o">&gt;</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">runApplication</span><span class="o">&lt;</span><span class="n">SiteApplication</span><span class="o">&gt;</span><span class="p">(</span><span class="o">*</span><span class="n">args</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></div>
+</figure>
+<ul>
+<li>Kotlin 애너테이션에서 배열은 <code>[...]</code> 로 씁니다.</li>
+<li><code>X::class</code> 는 Kotlin 클래스 참조입니다. (Java 의 <code>X.class</code>)</li>
+<li><code>runApplication&lt;SiteApplication&gt;</code> 은 타입을 꺾쇠로 넘기는 Spring Boot 의 Kotlin 전용 함수입니다.</li>
+</ul>
+<p>IDE 자동 완성을 위해 <a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/main/resources/META-INF/spring-configuration-metadata.json" target="_blank" rel="noopener">spring-configuration-metadata.json</a> 에 각 설정의 설명과 기본값을 적어 두었습니다.</p>
+<h3 id="value-와-비교"><code>@Value</code> 와 비교 <a class="header-anchor" href="#value-와-비교">#</a></h3>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th></th>
+<th><code>@ConfigurationProperties</code></th>
+<th><code>@Value(&quot;\${...}&quot;)</code></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>묶음</td>
+<td>관련 설정을 한 클래스로</td>
+<td>하나씩</td>
+</tr>
+<tr>
+<td>타입 변환·기본값</td>
+<td>생성자 기본값으로 자연스럽게</td>
+<td>문자열 안에 <code>:기본값</code></td>
+</tr>
+<tr>
+<td>이 프로젝트에서</td>
+<td>대부분</td>
+<td>로컬 관리자 계정 정도</td>
+</tr>
+</tbody>
+</table></div>
+<h2 id="6-파라미터-이름이-실행-중에도-남는-이유---java-parameters">6. 파라미터 이름이 실행 중에도 남는 이유 — <code>-java-parameters</code> <a class="header-anchor" href="#6-파라미터-이름이-실행-중에도-남는-이유---java-parameters">#</a></h2>
+<p>분산락의 키는 메서드 파라미터 이름으로 씁니다.</p>
+<figure class="code-block"><figcaption><span class="code-lang">Kotlin</span><button type="button" class="copy-button" aria-label="코드 복사">복사</button></figcaption><div class="highlight"><pre><span></span><code><span class="c1">// CouponIssueService.kt</span>
+<span class="w">    </span><span class="nd">@DistributedLock</span><span class="p">(</span><span class="n">key</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">"'coupon-event:' + #couponEventId"</span><span class="p">)</span>
+<span class="w">    </span><span class="kd">fun</span><span class="w"> </span><span class="nf">issueWithDistributedLock</span><span class="p">(</span><span class="n">couponEventId</span><span class="p">:</span><span class="w"> </span><span class="kt">Long</span><span class="p">,</span><span class="w"> </span><span class="n">memberId</span><span class="p">:</span><span class="w"> </span><span class="kt">Long</span><span class="p">):</span><span class="w"> </span><span class="n">IssuedCoupon</span><span class="w"> </span><span class="p">{</span>
+</code></pre></div>
+</figure>
+<p><code>#couponEventId</code> 를 실제 값으로 바꾸려면 <strong>실행 중에 파라미터 이름을 알아야</strong> 합니다.</p>
+<p><a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/main/kotlin/com/site/infrastructure/redis/lock/DistributedLockAspect.kt#L82-L86" target="_blank" rel="noopener">DistributedLockAspect.kt</a></p>
+<figure class="code-block"><figcaption><span class="code-lang">Kotlin</span><button type="button" class="copy-button" aria-label="코드 복사">복사</button></figcaption><div class="highlight"><pre><span></span><code><span class="c1">// "'coupon-event:' + #couponEventId" 같은 SpEL 을 실제 파라미터 값으로 평가한다</span>
+<span class="kd">private</span><span class="w"> </span><span class="kd">fun</span><span class="w"> </span><span class="nf">resolveKey</span><span class="p">(</span><span class="n">joinPoint</span><span class="p">:</span><span class="w"> </span><span class="n">ProceedingJoinPoint</span><span class="p">,</span><span class="w"> </span><span class="n">key</span><span class="p">:</span><span class="w"> </span><span class="kt">String</span><span class="p">):</span><span class="w"> </span><span class="kt">String</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kd">val</span><span class="w"> </span><span class="nv">signature</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">joinPoint</span><span class="p">.</span><span class="na">signature</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="n">MethodSignature</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="n">CustomSpringELParser</span><span class="p">.</span><span class="na">getDynamicValue</span><span class="p">(</span><span class="n">signature</span><span class="p">.</span><span class="na">parameterNames</span><span class="p">,</span><span class="w"> </span><span class="n">joinPoint</span><span class="p">.</span><span class="na">args</span><span class="p">,</span><span class="w"> </span><span class="n">key</span><span class="p">).</span><span class="na">toString</span><span class="p">()</span>
+<span class="p">}</span>
+</code></pre></div>
+</figure>
+<p>컴파일된 바이트코드에는 기본적으로 파라미터 이름이 남지 않습니다. Spring Boot Gradle 플러그인은 Kotlin 플러그인이 있으면 컴파일러에 <code>-java-parameters</code> 옵션을 켜서 이름을 남깁니다. 그래서 <code>@PathVariable couponEventId: Long</code> 처럼 이름을 따로 적지 않아도 경로 변수가 연결됩니다.</p>
+<h2 id="7-buildgradlekts-읽기">7. <code>build.gradle.kts</code> 읽기 <a class="header-anchor" href="#7-buildgradlekts-읽기">#</a></h2>
+<p>Gradle 설정도 Kotlin 으로 씁니다(Kotlin DSL). 주요 부분만 봅니다.</p>
+<p><a href="https://github.com/RosieOh/Kopring_Core/blob/main/build.gradle.kts#L21-L32" target="_blank" rel="noopener">build.gradle.kts</a></p>
+<figure class="code-block"><figcaption><span class="code-lang">Kotlin</span><button type="button" class="copy-button" aria-label="코드 복사">복사</button></figcaption><div class="highlight"><pre><span></span><code><span class="n">java</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">toolchain</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">languageVersion</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">JavaLanguageVersion</span><span class="p">.</span><span class="na">of</span><span class="p">(</span><span class="m">21</span><span class="p">)</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+
+<span class="n">repositories</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">mavenCentral</span><span class="p">()</span>
+<span class="p">}</span>
+
+<span class="c1">// Boot 3.4.1 기본값(1.20.4)은 Docker Engine 29+ 가 거부하는 구버전 API 로 접속한다</span>
+<span class="n">extra</span><span class="o">[</span><span class="s">"testcontainers.version"</span><span class="o">]</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">"1.21.4"</span>
+</code></pre></div>
+</figure>
+<ul>
+<li><code>toolchain</code>: JDK 21 로 컴파일한다.</li>
+<li><code>extra[&quot;testcontainers.version&quot;]</code>: Spring Boot 가 관리하는 라이브러리 버전을 덮어쓴다. 로컬 Docker 29 가 Testcontainers 1.20.4 의 접속을 거부해서 올렸다.</li>
+</ul>
+<p>의존성 블록의 구분:</p>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>구성</th>
+<th>뜻</th>
+<th>예</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>implementation</code></td>
+<td>컴파일·실행 모두 필요</td>
+<td><code>spring-boot-starter-web</code>, <code>jjwt</code></td>
+</tr>
+<tr>
+<td><code>runtimeOnly</code></td>
+<td>실행할 때만 필요</td>
+<td><code>mysql-connector-j</code>, <code>micrometer-registry-prometheus</code></td>
+</tr>
+<tr>
+<td><code>testImplementation</code></td>
+<td>테스트에만</td>
+<td><code>mockk</code>, <code>kotest-*</code>, <code>testcontainers</code></td>
+</tr>
+</tbody>
+</table></div>
+<p>Kotlin 으로 Spring 을 쓸 때 꼭 필요한 두 의존성:</p>
+<figure class="code-block"><figcaption><span class="code-lang">Kotlin</span><button type="button" class="copy-button" aria-label="코드 복사">복사</button></figcaption><div class="highlight"><pre><span></span><code><span class="n">implementation</span><span class="p">(</span><span class="s">"com.fasterxml.jackson.module:jackson-module-kotlin"</span><span class="p">)</span>
+<span class="n">implementation</span><span class="p">(</span><span class="s">"org.jetbrains.kotlin:kotlin-reflect"</span><span class="p">)</span>
+</code></pre></div>
+</figure>
+<ul>
+<li><code>jackson-module-kotlin</code>: JSON 을 Kotlin 의 <code>data class</code> 로 바꿀 때 주 생성자, 파라미터 기본값, null 여부를 이해하게 한다. JSON 에 없는 선택 필드에 기본값을 넣고, non-null 필드가 비면 요청을 거절하는 것이 이 모듈 덕분이다. (<a href="05-web-and-errors.html">5장</a>)</li>
+<li><code>kotlin-reflect</code>: Spring 이 Kotlin 클래스의 파라미터 기본값, null 여부를 읽는 데 쓴다.</li>
+</ul>
+<p><a href="https://github.com/RosieOh/Kopring_Core/blob/main/build.gradle.kts#L82-L97" target="_blank" rel="noopener">build.gradle.kts</a></p>
+<figure class="code-block"><figcaption><span class="code-lang">Kotlin</span><button type="button" class="copy-button" aria-label="코드 복사">복사</button></figcaption><div class="highlight"><pre><span></span><code><span class="n">tasks</span><span class="p">.</span><span class="na">named</span><span class="o">&lt;</span><span class="n">Test</span><span class="o">&gt;</span><span class="p">(</span><span class="s">"test"</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">useJUnitPlatform</span><span class="p">()</span>
+<span class="w">    </span><span class="c1">// 운영 서버(UTC)와 같은 조건으로 돌린다. 서버 시간대에 기대는 코드가 생기면 테스트가 깨진다.</span>
+<span class="w">    </span><span class="n">jvmArgs</span><span class="p">(</span><span class="s">"-Duser.timezone=UTC"</span><span class="p">)</span>
+<span class="p">}</span>
+
+<span class="n">kotlin</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">compilerOptions</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">freeCompilerArgs</span><span class="p">.</span><span class="na">addAll</span><span class="p">(</span><span class="s">"-Xjsr305=strict"</span><span class="p">)</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+
+<span class="n">ktlint</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="c1">// 플러그인 기본 엔진(1.0.x)은 Kotlin 2.x 컴파일러와 충돌한다. Kotlin 2.1 기반 엔진을 쓴다.</span>
+<span class="w">    </span><span class="n">version</span><span class="p">.</span><span class="na">set</span><span class="p">(</span><span class="s">"1.5.0"</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></div>
+</figure>
+<ul>
+<li><code>-Xjsr305=strict</code>: Spring 코드에 붙은 <code>@Nullable</code> 같은 null 표시를 Kotlin 타입에 엄격하게 반영한다. Spring API 가 null 을 돌려줄 수 있으면 Kotlin 에서 <code>T?</code> 로 보인다.</li>
+<li>테스트 JVM 을 UTC 로 돌리는 이유는 <a href="04-jpa-with-kotlin.html">4장</a>의 시간대 이야기에서 다룹니다.</li>
+<li>ktlint 는 코드 스타일 검사기입니다. CI 가 <code>./gradlew ktlintCheck</code> 를 돌리고, 스타일 규칙은 <a href="https://github.com/RosieOh/Kopring_Core/blob/main/.editorconfig" target="_blank" rel="noopener">.editorconfig</a> 에 있습니다.</li>
+</ul>
+<h2 id="8-프로필--환경마다-다른-설정">8. 프로필 — 환경마다 다른 설정 <a class="header-anchor" href="#8-프로필--환경마다-다른-설정">#</a></h2>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>파일</th>
+<th>언제</th>
+<th>내용</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/main/resources/application.properties" target="_blank" rel="noopener">application.properties</a></td>
+<td>항상</td>
+<td>공통 (Flyway 검증, 스케줄러 스레드, 지표 설정)</td>
+</tr>
+<tr>
+<td><a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/main/resources/application-local.properties" target="_blank" rel="noopener">application-local.properties</a></td>
+<td>기본 (<code>spring.profiles.default=local</code>)</td>
+<td>로컬 DB·Redis 주소, 로컬 전용 JWT 키, 관리자 계정</td>
+</tr>
+<tr>
+<td><code>application-prod.properties</code></td>
+<td>운영</td>
+<td>모든 접속 정보를 환경변수로만 받는다</td>
+</tr>
+<tr>
+<td><a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/test/resources/application-test.properties" target="_blank" rel="noopener">application-test.properties</a></td>
+<td>테스트</td>
+<td>스케줄러를 끄고 테스트가 직접 부른다</td>
+</tr>
+</tbody>
+</table></div>
+<p>운영 프로필에서 환경변수가 빠지면, 엉뚱한 에러 대신 무엇이 빠졌는지 알려 주며 멈춥니다.</p>
+<p><a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/main/kotlin/com/site/independent/config/ProdEnvironmentValidator.kt" target="_blank" rel="noopener">ProdEnvironmentValidator.kt</a></p>
+<figure class="code-block"><figcaption><span class="code-lang">Kotlin</span><button type="button" class="copy-button" aria-label="코드 복사">복사</button></figcaption><div class="highlight"><pre><span></span><code><span class="cm">/**</span>
+<span class="cm"> * 운영 프로필에서 필수 환경변수가 빠졌으면, 무엇이 빠졌는지 알려주며 기동을 멈춘다.</span>
+<span class="cm"> *</span>
+<span class="cm"> * Spring 은 해석하지 못한 "${DB_URL}" 을 문자열 그대로 넘긴다. 그러면 "URL must start with 'jdbc'" 나</span>
+<span class="cm"> * Base64 디코딩 오류처럼 원인과 동떨어진 에러가 엉뚱한 곳에서 난다.</span>
+<span class="cm"> *</span>
+<span class="cm"> * 빈을 만들기 전에 실행돼야 해서 @Component 가 아니라 EnvironmentPostProcessor 로 등록한다. (META-INF/spring.factories)</span>
+<span class="cm"> */</span>
+<span class="kd">class</span><span class="w"> </span><span class="nc">ProdEnvironmentValidator</span><span class="w"> </span><span class="p">:</span><span class="w"> </span><span class="n">EnvironmentPostProcessor</span><span class="w"> </span><span class="p">{</span>
+
+<span class="w">    </span><span class="kd">override</span><span class="w"> </span><span class="kd">fun</span><span class="w"> </span><span class="nf">postProcessEnvironment</span><span class="p">(</span><span class="n">environment</span><span class="p">:</span><span class="w"> </span><span class="n">ConfigurableEnvironment</span><span class="p">,</span><span class="w"> </span><span class="n">application</span><span class="p">:</span><span class="w"> </span><span class="n">SpringApplication</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="o">!</span><span class="n">environment</span><span class="p">.</span><span class="na">acceptsProfiles</span><span class="p">(</span><span class="n">Profiles</span><span class="p">.</span><span class="na">of</span><span class="p">(</span><span class="n">PROD_PROFILE</span><span class="p">)))</span><span class="w"> </span><span class="k">return</span>
+
+<span class="w">        </span><span class="kd">val</span><span class="w"> </span><span class="nv">missing</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">REQUIRED_VARIABLES</span><span class="p">.</span><span class="na">filter</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">environment</span><span class="p">.</span><span class="na">getProperty</span><span class="p">(</span><span class="nb">it</span><span class="p">).</span><span class="na">isNullOrBlank</span><span class="p">()</span><span class="w"> </span><span class="p">}</span>
+<span class="w">        </span><span class="n">check</span><span class="p">(</span><span class="n">missing</span><span class="p">.</span><span class="na">isEmpty</span><span class="p">())</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="s">"운영 프로필에 필요한 환경변수가 없습니다: </span><span class="si">${</span><span class="n">missing</span><span class="p">.</span><span class="na">joinToString</span><span class="p">()</span><span class="si">}</span><span class="s"> (application-prod.properties 참고)"</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="w">    </span><span class="p">}</span>
+</code></pre></div>
+</figure>
+<h3 id="설정으로-빈-고르기--conditionalonproperty">설정으로 빈 고르기 — <code>@ConditionalOnProperty</code> <a class="header-anchor" href="#설정으로-빈-고르기--conditionalonproperty">#</a></h3>
+<p>같은 인터페이스의 구현을 설정으로 바꿔 끼웁니다.</p>
+<figure class="code-block"><figcaption><span class="code-lang">Kotlin</span><button type="button" class="copy-button" aria-label="코드 복사">복사</button></figcaption><div class="highlight"><pre><span></span><code><span class="c1">// LoggingAlimtalkSender.kt — biztalk.enabled 가 false 이거나 없으면</span>
+<span class="nd">@ConditionalOnProperty</span><span class="p">(</span><span class="n">prefix</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">"biztalk"</span><span class="p">,</span><span class="w"> </span><span class="n">name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">[</span><span class="s">"enabled"</span><span class="o">]</span><span class="p">,</span><span class="w"> </span><span class="n">havingValue</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">"false"</span><span class="p">,</span><span class="w"> </span><span class="n">matchIfMissing</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="kc">true</span><span class="p">)</span>
+
+<span class="c1">// SolapiAlimtalkSender.kt — biztalk.enabled=true 일 때만</span>
+<span class="nd">@ConditionalOnProperty</span><span class="p">(</span><span class="n">prefix</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">"biztalk"</span><span class="p">,</span><span class="w"> </span><span class="n">name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">[</span><span class="s">"enabled"</span><span class="o">]</span><span class="p">,</span><span class="w"> </span><span class="n">havingValue</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">"true"</span><span class="p">)</span>
+</code></pre></div>
+</figure>
+<p>스케줄러도 같은 방식으로 테스트에서 끕니다. (<code>coupon.queue.scheduler.enabled=false</code>)</p>
+<h2 id="왜-이렇게-했나--흔한-실수">왜 이렇게 했나 / 흔한 실수 <a class="header-anchor" href="#왜-이렇게-했나--흔한-실수">#</a></h2>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>증상</th>
+<th>원인</th>
+<th>이 프로젝트의 처리</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>@Transactional</code> 이 동작하지 않는다</td>
+<td>클래스가 final 이라 프록시를 못 만듦</td>
+<td><code>plugin.spring</code></td>
+</tr>
+<tr>
+<td>엔티티 조회 시 <code>No default constructor</code></td>
+<td>인자 없는 생성자 없음</td>
+<td><code>plugin.jpa</code></td>
+</tr>
+<tr>
+<td>DTO 역직렬화 실패</td>
+<td>Jackson 이 Kotlin 생성자를 모름</td>
+<td><code>jackson-module-kotlin</code></td>
+</tr>
+<tr>
+<td>운영 기동 시 이해 안 되는 에러</td>
+<td>환경변수 누락이 문자열 <code>${...}</code> 로 넘어감</td>
+<td><code>ProdEnvironmentValidator</code></td>
+</tr>
+<tr>
+<td>SpEL <code>#couponEventId</code> 가 null</td>
+<td>파라미터 이름이 바이트코드에 없음</td>
+<td>Spring Boot 플러그인의 <code>-java-parameters</code></td>
+</tr>
+</tbody>
+</table></div>
+<h2 id="직접-해보기">직접 해보기 <a class="header-anchor" href="#직접-해보기">#</a></h2>
+<ol>
+<li><code>build.gradle.kts</code> 에서 <code>kotlin(&quot;plugin.spring&quot;)</code> 줄을 잠시 지우고 <code>./gradlew test --tests '*CouponIssueConcurrencyTest*'</code> 를 돌려 보세요. 어떤 에러가 나나요? (확인 후 되돌리세요)</li>
+<li><code>CouponQueueProperties</code> 에 <code>drainBatchSize</code> 설정을 추가해, 지금 <code>CouponQueueWorker</code> 에 상수로 있는 <code>DRAIN_BATCH_SIZE</code> 를 설정으로 바꿔 보세요. 메타데이터 JSON 도 함께 고칩니다.</li>
+<li>앱을 <code>./gradlew bootRun --args='--coupon.issue.direct-strategy=distributed-lock'</code> 로 띄우면 어느 클래스의 어떤 분기가 달라지나요?</li>
+</ol>
+<p>다음 장: <a href="03-architecture.html">3장. 프로젝트 구조와 계층</a></p>
+
+</article>
+<p class="source-link"><a href="https://github.com/RosieOh/Kopring_Core/blob/main/docs/02-spring-meets-kotlin.md" target="_blank" rel="noopener">이 장의 원본 Markdown 보기</a></p>
+<nav class="pager" aria-label="장 이동"><a class="pager-prev" href="01-kotlin-basics.html"><span>이전</span>1장. Kotlin 기초</a><a class="pager-next" href="03-architecture.html"><span>다음</span>3장. 프로젝트 구조와 계층</a></nav>
+</main>
+<nav class="page-toc" aria-label="이 장의 목차"><p class="page-toc-title">이 장에서</p><ol><li class="toc-level-2"><a href="#1-스프링이-하는-일-아주-짧게">1. 스프링이 하는 일, 아주 짧게</a></li>
+<li class="toc-level-2"><a href="#2-문제-1--kotlin-클래스는-기본이-final">2. 문제 1 — Kotlin 클래스는 기본이 final</a></li>
+<li class="toc-level-2"><a href="#3-문제-2--jpa-는-인자-없는-생성자가-필요하다">3. 문제 2 — JPA 는 인자 없는 생성자가 필요하다</a></li>
+<li class="toc-level-2"><a href="#4-생성자-주입--autowired-가-없는-이유">4. 생성자 주입 — @Autowired 가 없는 이유</a></li>
+<li class="toc-level-2"><a href="#5-설정값을-타입으로--configurationproperties--data-class">5. 설정값을 타입으로 — @ConfigurationProperties + data class</a></li>
+<li class="toc-level-3"><a href="#value-와-비교">@Value 와 비교</a></li>
+<li class="toc-level-2"><a href="#6-파라미터-이름이-실행-중에도-남는-이유---java-parameters">6. 파라미터 이름이 실행 중에도 남는 이유 — -java-parameters</a></li>
+<li class="toc-level-2"><a href="#7-buildgradlekts-읽기">7. build.gradle.kts 읽기</a></li>
+<li class="toc-level-2"><a href="#8-프로필--환경마다-다른-설정">8. 프로필 — 환경마다 다른 설정</a></li>
+<li class="toc-level-3"><a href="#설정으로-빈-고르기--conditionalonproperty">설정으로 빈 고르기 — @ConditionalOnProperty</a></li>
+<li class="toc-level-2"><a href="#왜-이렇게-했나--흔한-실수">왜 이렇게 했나 / 흔한 실수</a></li>
+<li class="toc-level-2"><a href="#직접-해보기">직접 해보기</a></li></ol></nav>
+</div>
+</body>
+</html>
