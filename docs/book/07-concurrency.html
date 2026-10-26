@@ -1,0 +1,800 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>7장. 동시성 제어 — 코프링 교재</title>
+<meta name="description" content="선착순 쿠폰 코드로 배우는 Kotlin + Spring Boot">
+<script>try{var t=localStorage.getItem("book-theme");if(t)document.documentElement.dataset.theme=t;}catch(e){}</script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+<link rel="stylesheet" href="assets/book.css">
+<link rel="stylesheet" href="assets/highlight.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11.4.1/dist/mermaid.min.js" defer></script>
+<script src="assets/book.js" defer></script>
+</head>
+<body>
+<a class="skip-link" href="#content">본문으로 건너뛰기</a>
+<header class="topbar">
+  <button type="button" class="menu-button" aria-label="장 목록 열기" aria-expanded="false" aria-controls="sidebar">목차</button>
+  <a class="topbar-title" href="index.html">코프링 교재</a>
+  <button type="button" class="theme-button" aria-label="밝은 화면과 어두운 화면 바꾸기">화면</button>
+</header>
+<div class="layout">
+<aside class="sidebar" id="sidebar">
+  <a class="sidebar-title" href="index.html">코프링 교재<small>선착순 쿠폰으로 배우는 Kotlin + Spring Boot</small></a>
+  <nav aria-label="장 목록"><ol class="chapter-list">
+<li><a href="index.html">처음에 — 읽는 법과 목차</a></li>
+<li><a href="01-kotlin-basics.html">1장. Kotlin 기초</a></li>
+<li><a href="02-spring-meets-kotlin.html">2장. 스프링이 Kotlin 을 만나면</a></li>
+<li><a href="03-architecture.html">3장. 프로젝트 구조와 계층</a></li>
+<li><a href="04-jpa-with-kotlin.html">4장. JPA 엔티티를 Kotlin 으로</a></li>
+<li><a href="05-web-and-errors.html">5장. 웹 계층과 예외 처리</a></li>
+<li><a href="06-auth.html">6장. 인증</a></li>
+<li><a href="07-concurrency.html" aria-current="page">7장. 동시성 제어</a></li>
+<li><a href="08-async-and-reliability.html">8장. 비동기와 신뢰성</a></li>
+<li><a href="09-redis-queue.html">9장. Redis 대기열</a></li>
+<li><a href="10-testing.html">10장. 테스트</a></li>
+<li><a href="11-observability-and-load-test.html">11장. 관측과 부하 테스트</a></li>
+<li><a href="12-next-steps-and-exercises.html">12장. 다음 공부와 연습 문제</a></li>
+<li><a href="13-virtual-threads-and-backpressure.html">13장. 심화: 가상 스레드와 몰림 대응</a></li>
+  </ol></nav>
+</aside>
+<main id="content" class="content">
+<article class="markdown">
+<h1 id="7장-동시성-제어--이-프로젝트의-심장">7장. 동시성 제어 — 이 프로젝트의 심장 <a class="header-anchor" href="#7장-동시성-제어--이-프로젝트의-심장">#</a></h1>
+<p><strong>한 줄 요약</strong>: &quot;읽고 → 판단하고 → 쓰는&quot; 사이에 다른 요청이 끼어들면 쿠폰이 초과 발급됩니다. 그 틈을 막는 방법(락 다섯 가지)은 모두 정확하지만, <strong>어디서 기다리느냐</strong>가 달라 몰릴 때의 속도와 비용이 다릅니다.</p>
+<h2 id="1-문제--lost-update">1. 문제 — Lost Update <a class="header-anchor" href="#1-문제--lost-update">#</a></h2>
+<p><a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/main/kotlin/com/site/domain/coupon/entity/CouponEvent.kt#L114-L126" target="_blank" rel="noopener">CouponEvent.kt</a></p>
+<figure class="code-block"><figcaption><span class="code-lang">Kotlin</span><button type="button" class="copy-button" aria-label="코드 복사">복사</button></figcaption><div class="highlight"><pre><span></span><code><span class="cm">/**</span>
+<span class="cm"> * 메모리에서 issuedQuantity 를 quantity 만큼 올린다. (커밋 시점에 dirty checking 으로 UPDATE)</span>
+<span class="cm"> * "읽고 → 판단하고 → 쓰는" 구조라서, 동시에 여러 요청이 같은 값을 읽으면 Lost Update 가 생긴다.</span>
+<span class="cm"> * 이 메서드를 안전하게 쓰려면 호출하는 쪽에서 락으로 감싸야 한다. (CouponIssueService 참고)</span>
+<span class="cm"> */</span>
+<span class="kd">fun</span><span class="w"> </span><span class="nf">issue</span><span class="p">(</span><span class="n">now</span><span class="p">:</span><span class="w"> </span><span class="n">LocalDateTime</span><span class="p">,</span><span class="w"> </span><span class="n">quantity</span><span class="p">:</span><span class="w"> </span><span class="kt">Int</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="m">1</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">require</span><span class="p">(</span><span class="n">quantity</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="m">0</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="s">"quantity must be positive: </span><span class="si">$</span><span class="n">quantity</span><span class="s">"</span><span class="w"> </span><span class="p">}</span>
+<span class="w">    </span><span class="n">checkIssuable</span><span class="p">(</span><span class="n">now</span><span class="p">)</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">remainingQuantity</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="n">quantity</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="k">throw</span><span class="w"> </span><span class="n">ServiceException</span><span class="p">(</span><span class="n">ErrorCode</span><span class="p">.</span><span class="na">COUPON_SOLD_OUT</span><span class="p">)</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">    </span><span class="n">issuedQuantity</span><span class="w"> </span><span class="o">+=</span><span class="w"> </span><span class="n">quantity</span>
+<span class="p">}</span>
+</code></pre></div>
+</figure>
+<p>남은 쿠폰이 1장일 때 두 요청이 동시에 오면:</p>
+<figure class="diagram"><pre class="mermaid" data-source="sequenceDiagram
+    participant A as 요청 A
+    participant DB as DB (발급 99 / 총 100)
+    participant B as 요청 B
+    A-&gt;&gt;DB: SELECT → issued=99
+    B-&gt;&gt;DB: SELECT → issued=99
+    A-&gt;&gt;A: 1장 남았다 → 발급
+    B-&gt;&gt;B: 1장 남았다 → 발급
+    A-&gt;&gt;DB: UPDATE issued=100, 쿠폰 INSERT
+    B-&gt;&gt;DB: UPDATE issued=100, 쿠폰 INSERT
+    Note over DB: 쿠폰은 101장, 수량 컬럼은 100
+">sequenceDiagram
+    participant A as 요청 A
+    participant DB as DB (발급 99 / 총 100)
+    participant B as 요청 B
+    A-&gt;&gt;DB: SELECT → issued=99
+    B-&gt;&gt;DB: SELECT → issued=99
+    A-&gt;&gt;A: 1장 남았다 → 발급
+    B-&gt;&gt;B: 1장 남았다 → 발급
+    A-&gt;&gt;DB: UPDATE issued=100, 쿠폰 INSERT
+    B-&gt;&gt;DB: UPDATE issued=100, 쿠폰 INSERT
+    Note over DB: 쿠폰은 101장, 수량 컬럼은 100
+</pre></figure>
+<p>쿠폰은 101장 나갔고, 수량 컬럼은 B 가 A 의 결과를 덮어써서 100 입니다. 이것이 <strong>Lost Update</strong> 입니다. 테스트로 재현합니다.</p>
+<p><a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/test/kotlin/com/site/domain/coupon/service/CouponIssueConcurrencyTest.kt#L67-L76" target="_blank" rel="noopener">CouponIssueConcurrencyTest.kt</a></p>
+<figure class="code-block"><figcaption><span class="code-lang">Kotlin</span><button type="button" class="copy-button" aria-label="코드 복사">복사</button></figcaption><div class="highlight"><pre><span></span><code><span class="nd">@Test</span>
+<span class="kd">fun</span><span class="w"> </span><span class="err">`락이 없으면 동시 요청에서 발급 수량이 어긋난다`() {</span>
+<span class="w">    </span><span class="kd">val</span><span class="w"> </span><span class="nv">result</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">issueConcurrently</span><span class="p">(</span><span class="s">"락 없음"</span><span class="p">,</span><span class="w"> </span><span class="n">learningStrategies</span><span class="o">::</span><span class="n">issueWithoutLock</span><span class="p">)</span>
+
+<span class="w">    </span><span class="c1">// 타이밍에 따라 결과가 달라지는 문제라 "정확히 몇 장"이 아니라 "정합성이 깨졌는지"를 확인한다.</span>
+<span class="w">    </span><span class="c1">// 초과 발급(쿠폰 &gt; 100장) 또는 Lost Update(수량 컬럼 ≠ 실제 발급 건수) 중 하나는 거의 확실하게 일어난다.</span>
+<span class="w">    </span><span class="n">assertTrue</span><span class="p">(</span>
+<span class="w">        </span><span class="n">result</span><span class="p">.</span><span class="na">issuedCouponCount</span><span class="w"> </span><span class="o">&gt;</span><span class="w"> </span><span class="n">TOTAL_QUANTITY</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="n">result</span><span class="p">.</span><span class="na">issuedQuantity</span><span class="p">.</span><span class="na">toLong</span><span class="p">()</span><span class="w"> </span><span class="o">!=</span><span class="w"> </span><span class="n">result</span><span class="p">.</span><span class="na">issuedCouponCount</span><span class="p">,</span>
+<span class="w">    </span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="s">"정합성이 깨지지 않았습니다: </span><span class="si">$</span><span class="n">result</span><span class="s">"</span><span class="w"> </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+</figure>
+<p>한 번 실행한 로그(실행마다 다릅니다): <code>락 없음</code> — 100장짜리 이벤트에 300명이 요청해 <strong>300명 모두 성공, 쿠폰 300장 발급, 수량 컬럼은 30</strong>.</p>
+<h2 id="2-해법-다섯-가지">2. 해법 다섯 가지 <a class="header-anchor" href="#2-해법-다섯-가지">#</a></h2>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>방식</th>
+<th>핵심</th>
+<th>기다리는 곳</th>
+<th>이 프로젝트에서</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>락 없음</td>
+<td>—</td>
+<td>—</td>
+<td>테스트 전용 (비교용)</td>
+</tr>
+<tr>
+<td>비관적 락</td>
+<td><code>SELECT ... FOR UPDATE</code></td>
+<td>DB 행 잠금 (커넥션을 쥔 채)</td>
+<td>대기열 일괄 발급</td>
+</tr>
+<tr>
+<td>분산락</td>
+<td>Redis 락을 먼저 잡는다</td>
+<td>Redis (커넥션 안 씀)</td>
+<td>즉시 발급 선택지</td>
+</tr>
+<tr>
+<td>원자적 UPDATE</td>
+<td><code>UPDATE ... WHERE 남아 있으면</code></td>
+<td>DB 행 잠금 (짧게)</td>
+<td>즉시 발급 기본값</td>
+</tr>
+<tr>
+<td>낙관적 락</td>
+<td><code>@Version</code>, 충돌하면 실패</td>
+<td>기다리지 않는다</td>
+<td>쿠폰 사용</td>
+</tr>
+</tbody>
+</table></div>
+<p>&quot;락 없음&quot;과 비관적 락의 원래 구현은 운영 코드에서 테스트 소스로 옮겼습니다.</p>
+<p><a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/main/kotlin/com/site/domain/coupon/service/CouponIssueService.kt#L28-L29" target="_blank" rel="noopener">CouponIssueService.kt</a></p>
+<figure class="code-block"><figcaption><span class="code-lang">Kotlin</span><button type="button" class="copy-button" aria-label="코드 복사">복사</button></figcaption><div class="highlight"><pre><span></span><code><span class="o">*</span><span class="w"> </span><span class="m">3</span><span class="err">단계에서</span><span class="w"> </span><span class="err">함께</span><span class="w"> </span><span class="err">비교했던</span><span class="w"> </span><span class="s">"락 없음"</span><span class="p">,</span><span class="w"> </span><span class="s">"비관적 락"</span><span class="w"> </span><span class="err">방식은</span><span class="w"> </span><span class="err">운영</span><span class="w"> </span><span class="err">코드에서</span><span class="w"> </span><span class="err">빼서</span><span class="w"> </span><span class="err">테스트</span><span class="w"> </span><span class="err">소스</span>
+<span class="o">*</span><span class="w"> </span><span class="p">(</span><span class="n">LearningCouponIssueStrategies</span><span class="p">)</span><span class="err">로</span><span class="w"> </span><span class="err">옮겼다</span><span class="p">.</span><span class="w"> </span><span class="err">운영</span><span class="w"> </span><span class="err">코드에</span><span class="w"> </span><span class="err">두면</span><span class="w"> </span><span class="err">누군가</span><span class="w"> </span><span class="err">락</span><span class="w"> </span><span class="err">없는</span><span class="w"> </span><span class="err">버전을</span><span class="w"> </span><span class="err">호출해</span><span class="w"> </span><span class="err">초과</span><span class="w"> </span><span class="err">발급이</span><span class="w"> </span><span class="err">날</span><span class="w"> </span><span class="err">수</span><span class="w"> </span><span class="err">있다</span><span class="p">.</span>
+</code></pre></div>
+</figure>
+<h3 id="2-1-비관적-락--행을-잠그고-줄-세우기">2-1. 비관적 락 — 행을 잠그고 줄 세우기 <a class="header-anchor" href="#2-1-비관적-락--행을-잠그고-줄-세우기">#</a></h3>
+<p><a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/test/kotlin/com/site/support/LearningCouponIssueStrategies.kt#L36-L47" target="_blank" rel="noopener">LearningCouponIssueStrategies.kt</a></p>
+<figure class="code-block"><figcaption><span class="code-lang">Kotlin</span><button type="button" class="copy-button" aria-label="코드 복사">복사</button></figcaption><div class="highlight"><pre><span></span><code><span class="cm">/**</span>
+<span class="cm"> * 비관적 락 — SELECT ... FOR UPDATE 로 이벤트 행을 잠근다.</span>
+<span class="cm"> * 같은 이벤트에 대한 요청은 DB 에서 한 줄로 서서 하나씩 처리된다.</span>
+<span class="cm"> * 가장 단순하지만, 기다리는 동안에도 DB 커넥션을 붙잡고 있어서 요청이 몰리면 커넥션 풀이 먼저 바닥난다.</span>
+<span class="cm"> */</span>
+<span class="nd">@Transactional</span>
+<span class="kd">fun</span><span class="w"> </span><span class="nf">issueWithPessimisticLock</span><span class="p">(</span><span class="n">couponEventId</span><span class="p">:</span><span class="w"> </span><span class="kt">Long</span><span class="p">,</span><span class="w"> </span><span class="n">memberId</span><span class="p">:</span><span class="w"> </span><span class="kt">Long</span><span class="p">):</span><span class="w"> </span><span class="n">IssuedCoupon</span><span class="w"> </span><span class="o">=</span>
+<span class="w">    </span><span class="n">issue</span><span class="p">(</span><span class="n">find</span><span class="p">(</span><span class="n">couponEventId</span><span class="p">,</span><span class="w"> </span><span class="n">LockModeType</span><span class="p">.</span><span class="na">PESSIMISTIC_WRITE</span><span class="p">),</span><span class="w"> </span><span class="n">memberId</span><span class="p">)</span>
+
+<span class="kd">private</span><span class="w"> </span><span class="kd">fun</span><span class="w"> </span><span class="nf">find</span><span class="p">(</span><span class="n">couponEventId</span><span class="p">:</span><span class="w"> </span><span class="kt">Long</span><span class="p">,</span><span class="w"> </span><span class="n">lockMode</span><span class="p">:</span><span class="w"> </span><span class="n">LockModeType</span><span class="p">):</span><span class="w"> </span><span class="n">CouponEvent</span><span class="w"> </span><span class="o">=</span>
+<span class="w">    </span><span class="n">entityManager</span><span class="p">.</span><span class="na">find</span><span class="p">(</span><span class="n">CouponEvent</span><span class="o">::</span><span class="n">class</span><span class="p">.</span><span class="na">java</span><span class="p">,</span><span class="w"> </span><span class="n">couponEventId</span><span class="p">,</span><span class="w"> </span><span class="n">lockMode</span><span class="p">)</span>
+<span class="w">        </span><span class="o">?:</span><span class="w"> </span><span class="k">throw</span><span class="w"> </span><span class="n">ServiceException</span><span class="p">(</span><span class="n">ErrorCode</span><span class="p">.</span><span class="na">COUPON_EVENT_NOT_FOUND</span><span class="p">)</span>
+</code></pre></div>
+</figure>
+<p>먼저 잠근 요청이 커밋할 때까지 다른 요청은 SELECT 에서 멈춥니다. 정확하지만 <strong>기다리는 요청마다 DB 커넥션 하나</strong>를 차지합니다. 커넥션 풀은 기본 10개입니다.</p>
+<h3 id="2-2-분산락--db-밖에서-줄-세우기">2-2. 분산락 — DB 밖에서 줄 세우기 <a class="header-anchor" href="#2-2-분산락--db-밖에서-줄-세우기">#</a></h3>
+<p>Redis 에 &quot;coupon-event:7 락&quot;을 잡은 요청만 DB 에 들어갑니다. 기다림이 Redis 에서 일어나 DB 커넥션을 쓰지 않습니다.</p>
+<p><a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/main/kotlin/com/site/domain/coupon/service/CouponIssueService.kt#L43-L54" target="_blank" rel="noopener">CouponIssueService.kt</a></p>
+<figure class="code-block"><figcaption><span class="code-lang">Kotlin</span><button type="button" class="copy-button" aria-label="코드 복사">복사</button></figcaption><div class="highlight"><pre><span></span><code><span class="cm">/**</span>
+<span class="cm"> * 분산락 — 즉시 발급 방식 중 하나(coupon.issue.direct-strategy=distributed-lock).</span>
+<span class="cm"> * Redis 락을 먼저 잡고, 그 안에서 트랜잭션을 열어 커밋한 뒤 락을 푼다.</span>
+<span class="cm"> * 기다리는 건 Redis 에서 하므로 DB 커넥션을 붙잡지 않고, 서버가 여러 대여도 동작한다.</span>
+<span class="cm"> * 대신 Redis 라는 의존성이 하나 늘고, 락 획득/해제만큼 왕복 시간이 추가된다.</span>
+<span class="cm"> */</span>
+<span class="nd">@DistributedLock</span><span class="p">(</span><span class="n">key</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">"'coupon-event:' + #couponEventId"</span><span class="p">)</span>
+<span class="kd">fun</span><span class="w"> </span><span class="nf">issueWithDistributedLock</span><span class="p">(</span><span class="n">couponEventId</span><span class="p">:</span><span class="w"> </span><span class="kt">Long</span><span class="p">,</span><span class="w"> </span><span class="n">memberId</span><span class="p">:</span><span class="w"> </span><span class="kt">Long</span><span class="p">):</span><span class="w"> </span><span class="n">IssuedCoupon</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kd">val</span><span class="w"> </span><span class="nv">couponEvent</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">findCouponEvent</span><span class="p">(</span><span class="n">couponEventId</span><span class="p">)</span>
+<span class="w">    </span><span class="n">couponEvent</span><span class="p">.</span><span class="na">checkIssueMode</span><span class="p">(</span><span class="n">CouponIssueMode</span><span class="p">.</span><span class="na">DIRECT</span><span class="p">)</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="n">issue</span><span class="p">(</span><span class="n">couponEvent</span><span class="p">,</span><span class="w"> </span><span class="n">memberId</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></div>
+</figure>
+<p>메서드 본문에는 락 코드가 없습니다. <code>@DistributedLock</code> 애너테이션을 보고 <strong>AOP</strong>(Aspect)가 앞뒤에 락을 끼워 넣습니다.</p>
+<p><a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/main/kotlin/com/site/infrastructure/redis/lock/DistributedLockAspect.kt#L19-L62" target="_blank" rel="noopener">DistributedLockAspect.kt</a></p>
+<figure class="code-block"><figcaption><span class="code-lang">Kotlin</span><button type="button" class="copy-button" aria-label="코드 복사">복사</button></figcaption><div class="highlight"><pre><span></span><code><span class="cm">/**</span>
+<span class="cm"> * @DistributedLock 이 붙은 메서드를 Redisson 락으로 감싼다.</span>
+<span class="cm"> *</span>
+<span class="cm"> * 순서: 트랜잭션 인터셉터(기본 LOWEST_PRECEDENCE)보다 한 칸 바깥에서 실행되게 한다.</span>
+<span class="cm"> * 트랜잭션 프록시가 락보다 바깥에 있으면 "트랜잭션 시작 → 락 → 해제 → 커밋" 순서가 되어 락이 의미를 잃는다.</span>
+<span class="cm"> *</span>
+<span class="cm"> * HIGHEST_PRECEDENCE 를 쓰면 안 된다. 스프링 내부의 ExposeInvocationInterceptor 보다 앞서 실행돼서</span>
+<span class="cm"> * @annotation(distributedLock) 같은 파라미터 바인딩이 실패한다. ("JoinPointMatch was NOT bound in invocation")</span>
+<span class="cm"> */</span>
+<span class="nd">@Aspect</span>
+<span class="nd">@Component</span>
+<span class="nd">@Order</span><span class="p">(</span><span class="n">Ordered</span><span class="p">.</span><span class="na">LOWEST_PRECEDENCE</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="m">1</span><span class="p">)</span>
+<span class="kd">class</span><span class="w"> </span><span class="nc">DistributedLockAspect</span><span class="p">(</span>
+<span class="w">    </span><span class="kd">private</span><span class="w"> </span><span class="kd">val</span><span class="w"> </span><span class="nv">redissonClient</span><span class="p">:</span><span class="w"> </span><span class="n">RedissonClient</span><span class="p">,</span>
+<span class="w">    </span><span class="kd">private</span><span class="w"> </span><span class="kd">val</span><span class="w"> </span><span class="nv">newTransactionRunner</span><span class="p">:</span><span class="w"> </span><span class="n">NewTransactionRunner</span><span class="p">,</span>
+<span class="w">    </span><span class="kd">private</span><span class="w"> </span><span class="kd">val</span><span class="w"> </span><span class="nv">meterRegistry</span><span class="p">:</span><span class="w"> </span><span class="n">MeterRegistry</span><span class="p">,</span>
+<span class="p">)</span><span class="w"> </span><span class="p">{</span>
+
+<span class="w">    </span><span class="nd">@Around</span><span class="p">(</span><span class="s">"@annotation(distributedLock)"</span><span class="p">)</span>
+<span class="w">    </span><span class="kd">fun</span><span class="w"> </span><span class="nf">lock</span><span class="p">(</span><span class="n">joinPoint</span><span class="p">:</span><span class="w"> </span><span class="n">ProceedingJoinPoint</span><span class="p">,</span><span class="w"> </span><span class="n">distributedLock</span><span class="p">:</span><span class="w"> </span><span class="n">DistributedLock</span><span class="p">):</span><span class="w"> </span><span class="kt">Any?</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="kd">val</span><span class="w"> </span><span class="nv">lockName</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">LOCK_PREFIX</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">resolveKey</span><span class="p">(</span><span class="n">joinPoint</span><span class="p">,</span><span class="w"> </span><span class="n">distributedLock</span><span class="p">.</span><span class="na">key</span><span class="p">)</span>
+<span class="w">        </span><span class="kd">val</span><span class="w"> </span><span class="nv">lock</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">redissonClient</span><span class="p">.</span><span class="na">getLock</span><span class="p">(</span><span class="n">lockName</span><span class="p">)</span>
+
+<span class="w">        </span><span class="kd">val</span><span class="w"> </span><span class="nv">waitStartedAt</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">System</span><span class="p">.</span><span class="na">nanoTime</span><span class="p">()</span>
+<span class="w">        </span><span class="kd">val</span><span class="w"> </span><span class="nv">acquired</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">try</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="n">lock</span><span class="p">.</span><span class="na">tryLock</span><span class="p">(</span><span class="n">distributedLock</span><span class="p">.</span><span class="na">waitTime</span><span class="p">,</span><span class="w"> </span><span class="n">distributedLock</span><span class="p">.</span><span class="na">leaseTime</span><span class="p">,</span><span class="w"> </span><span class="n">distributedLock</span><span class="p">.</span><span class="na">timeUnit</span><span class="p">)</span>
+<span class="w">        </span><span class="p">}</span><span class="w"> </span><span class="k">catch</span><span class="w"> </span><span class="p">(</span><span class="n">e</span><span class="p">:</span><span class="w"> </span><span class="n">InterruptedException</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="n">Thread</span><span class="p">.</span><span class="na">currentThread</span><span class="p">().</span><span class="na">interrupt</span><span class="p">()</span>
+<span class="w">            </span><span class="k">throw</span><span class="w"> </span><span class="n">ServiceException</span><span class="p">(</span><span class="n">ErrorCode</span><span class="p">.</span><span class="na">LOCK_ACQUISITION_FAILED</span><span class="p">)</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="w">        </span><span class="n">recordWait</span><span class="p">(</span><span class="n">distributedLock</span><span class="p">.</span><span class="na">key</span><span class="p">,</span><span class="w"> </span><span class="n">acquired</span><span class="p">,</span><span class="w"> </span><span class="n">System</span><span class="p">.</span><span class="na">nanoTime</span><span class="p">()</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">waitStartedAt</span><span class="p">)</span>
+<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="o">!</span><span class="n">acquired</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="k">throw</span><span class="w"> </span><span class="n">ServiceException</span><span class="p">(</span><span class="n">ErrorCode</span><span class="p">.</span><span class="na">LOCK_ACQUISITION_FAILED</span><span class="p">)</span>
+<span class="w">        </span><span class="p">}</span>
+
+<span class="w">        </span><span class="k">try</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="k">return</span><span class="w"> </span><span class="n">newTransactionRunner</span><span class="p">.</span><span class="na">proceed</span><span class="p">(</span><span class="n">joinPoint</span><span class="p">)</span>
+<span class="w">        </span><span class="p">}</span><span class="w"> </span><span class="k">finally</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="c1">// 락을 쥔 스레드만 풀 수 있다. (다른 스레드가 풀려고 하면 Redisson 이 예외를 던진다)</span>
+<span class="w">            </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">lock</span><span class="p">.</span><span class="na">isHeldByCurrentThread</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">                </span><span class="n">lock</span><span class="p">.</span><span class="na">unlock</span><span class="p">()</span>
+<span class="w">            </span><span class="p">}</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="w">    </span><span class="p">}</span>
+</code></pre></div>
+</figure>
+<p>여기에 이 장에서 가장 중요한 교훈이 있습니다. <strong>순서</strong>입니다.</p>
+<figure class="diagram"><pre class="mermaid" data-source="flowchart LR
+    L1[&quot;락 획득&quot;] --&gt; T1[&quot;트랜잭션 시작&quot;] --&gt; W1[&quot;읽고·판단·쓰기&quot;] --&gt; C1[&quot;커밋&quot;] --&gt; U1[&quot;락 해제&quot;]
+">flowchart LR
+    L1[&quot;락 획득&quot;] --&gt; T1[&quot;트랜잭션 시작&quot;] --&gt; W1[&quot;읽고·판단·쓰기&quot;] --&gt; C1[&quot;커밋&quot;] --&gt; U1[&quot;락 해제&quot;]
+</pre></figure>
+<p>락을 커밋보다 <strong>먼저</strong> 풀면, 다음 요청이 락을 잡고 DB 를 읽을 때 앞 요청의 변경이 아직 커밋 전이라 옛 값을 읽습니다. 락을 걸었는데도 Lost Update 가 납니다. 그래서:</p>
+<ol>
+<li><code>@Order(Ordered.LOWEST_PRECEDENCE - 1)</code>: Spring 의 트랜잭션 인터셉터(기본 <code>LOWEST_PRECEDENCE</code>)보다 바깥에서 실행한다. 바깥 = 먼저 시작, 나중에 끝.</li>
+<li><code>HIGHEST_PRECEDENCE</code> 는 안 된다: 실제로 써 봤다가 <code>@annotation(distributedLock)</code> 파라미터 바인딩이 깨지는 에러를 만났다. 주석에 그 에러 메시지가 남아 있다.</li>
+<li>트랜잭션은 Aspect 가 직접 연다. 그것도 <strong>항상 새로</strong>.</li>
+</ol>
+<p><a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/main/kotlin/com/site/infrastructure/redis/lock/NewTransactionRunner.kt#L8-L21" target="_blank" rel="noopener">NewTransactionRunner.kt</a></p>
+<figure class="code-block"><figcaption><span class="code-lang">Kotlin</span><button type="button" class="copy-button" aria-label="코드 복사">복사</button></figcaption><div class="highlight"><pre><span></span><code><span class="cm">/**</span>
+<span class="cm"> * 락 안에서 실행할 로직을 "항상 새로운" 트랜잭션으로 실행한다.</span>
+<span class="cm"> *</span>
+<span class="cm"> * REQUIRED(기본값)였다면 호출한 쪽에 이미 트랜잭션이 있을 때 거기에 합류해 버린다.</span>
+<span class="cm"> * 그러면 커밋이 바깥 트랜잭션이 끝날 때(= 락을 푼 뒤)로 밀려서, 다음 요청이 커밋 전의 옛 값을 읽게 된다.</span>
+<span class="cm"> *</span>
+<span class="cm"> * @Transactional 은 프록시를 통해야 동작하므로 Aspect 안에 메서드로 두지 않고 별도 빈으로 분리했다. (self-invocation 문제)</span>
+<span class="cm"> */</span>
+<span class="nd">@Component</span>
+<span class="kd">class</span><span class="w"> </span><span class="nc">NewTransactionRunner</span><span class="w"> </span><span class="p">{</span>
+
+<span class="w">    </span><span class="nd">@Transactional</span><span class="p">(</span><span class="n">propagation</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Propagation</span><span class="p">.</span><span class="na">REQUIRES_NEW</span><span class="p">)</span>
+<span class="w">    </span><span class="kd">fun</span><span class="w"> </span><span class="nf">proceed</span><span class="p">(</span><span class="n">joinPoint</span><span class="p">:</span><span class="w"> </span><span class="n">ProceedingJoinPoint</span><span class="p">):</span><span class="w"> </span><span class="kt">Any?</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">joinPoint</span><span class="p">.</span><span class="na">proceed</span><span class="p">()</span>
+<span class="p">}</span>
+</code></pre></div>
+</figure>
+<p><code>leaseTime = -1</code> 의 의미도 애너테이션 주석에 있습니다. (<a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/main/kotlin/com/site/independent/lock/DistributedLock.kt" target="_blank" rel="noopener">DistributedLock.kt</a>: &quot;-1 이면 Redisson watchdog 이 작업이 끝날 때까지 만료를 계속 연장한다. 고정값을 주면 작업이 그보다 오래 걸릴 때 락이 먼저 풀려 버려 동시성 제어가 깨질 수 있다.&quot;)</p>
+<h3 id="2-3-원자적-update--db-가-한-문장으로-판단">2-3. 원자적 UPDATE — DB 가 한 문장으로 판단 <a class="header-anchor" href="#2-3-원자적-update--db-가-한-문장으로-판단">#</a></h3>
+<p>읽고 판단하는 일을 애플리케이션이 하지 않고, <strong>UPDATE 한 문장의 조건절</strong>에 넣습니다.</p>
+<p><a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/main/kotlin/com/site/domain/coupon/repository/CouponEventRepository.kt#L35-L51" target="_blank" rel="noopener">CouponEventRepository.kt</a></p>
+<figure class="code-block"><figcaption><span class="code-lang">Kotlin</span><button type="button" class="copy-button" aria-label="코드 복사">복사</button></figcaption><div class="highlight"><pre><span></span><code><span class="nd">@Modifying</span>
+<span class="nd">@Query</span><span class="p">(</span>
+<span class="w">    </span><span class="s">"""</span>
+<span class="s">    update CouponEvent e</span>
+<span class="s">       set e.issuedQuantity = e.issuedQuantity + 1</span>
+<span class="s">     where e.id = :id</span>
+<span class="s">       and e.issueMode = :mode</span>
+<span class="s">       and e.issuedQuantity &lt; e.totalQuantity</span>
+<span class="s">       and e.period.startAt &lt;= :now</span>
+<span class="s">       and e.period.endAt &gt; :now</span>
+<span class="s">    """</span><span class="p">,</span>
+<span class="p">)</span>
+<span class="kd">fun</span><span class="w"> </span><span class="nf">increaseIssuedQuantity</span><span class="p">(</span>
+<span class="w">    </span><span class="n">id</span><span class="p">:</span><span class="w"> </span><span class="kt">Long</span><span class="p">,</span>
+<span class="w">    </span><span class="n">mode</span><span class="p">:</span><span class="w"> </span><span class="n">CouponIssueMode</span><span class="p">,</span>
+<span class="w">    </span><span class="n">now</span><span class="p">:</span><span class="w"> </span><span class="n">LocalDateTime</span><span class="p">,</span>
+<span class="p">):</span><span class="w"> </span><span class="kt">Int</span>
+</code></pre></div>
+</figure>
+<p>DB 는 이 UPDATE 를 실행하는 동안 행을 잠급니다. 두 번째 요청은 첫 번째가 커밋할 때까지 기다렸다가, <strong>커밋된 최신 값</strong>으로 조건을 다시 봅니다. 반환값(바뀐 행 수)이 0 이면 소진입니다.</p>
+<p><a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/main/kotlin/com/site/domain/coupon/service/CouponIssueService.kt#L56-L85" target="_blank" rel="noopener">CouponIssueService.kt</a></p>
+<figure class="code-block"><figcaption><span class="code-lang">Kotlin</span><button type="button" class="copy-button" aria-label="코드 복사">복사</button></figcaption><div class="highlight"><pre><span></span><code><span class="cm">/**</span>
+<span class="cm"> * 원자적 조건부 UPDATE — 애플리케이션이 값을 읽고 판단하는 대신,</span>
+<span class="cm"> * "남아 있으면 +1"을 DB 가 UPDATE 한 문장 안에서 처리한다. 읽은 값과 쓰는 값 사이에 틈이 없다.</span>
+<span class="cm"> * 대신 발급 조건이 엔티티(CouponEvent.checkIssuable)와 쿼리 두 곳에 나뉘어 들어간다.</span>
+<span class="cm"> *</span>
+<span class="cm"> * UPDATE 는 커밋까지 이벤트 행 잠금을 쥔다. 모든 발급이 이 한 행에 줄을 서므로, 잠근 뒤 커밋까지 할 일을 줄였다.</span>
+<span class="cm"> * - 이벤트 조회와 중복 발급 확인은 잠그기 전에 한다. 기간·방식·유효기간은 시작 후 바뀌지 않아 미리 읽어도 된다.</span>
+<span class="cm"> * - 발급 내역 INSERT 를 UPDATE 보다 먼저 하면 잠금 구간이 더 줄지만, 같은 회원의 요청이 셋 이상 겹친 채 앞 요청이 롤백되면</span>
+<span class="cm"> *   unique 키 잠금끼리 데드락이 날 수 있다. UPDATE 를 먼저 해서 같은 이벤트의 INSERT 가 항상 차례로 일어나게 했다.</span>
+<span class="cm"> */</span>
+<span class="nd">@Transactional</span>
+<span class="kd">fun</span><span class="w"> </span><span class="nf">issueWithAtomicUpdate</span><span class="p">(</span>
+<span class="w">    </span><span class="n">couponEventId</span><span class="p">:</span><span class="w"> </span><span class="kt">Long</span><span class="p">,</span>
+<span class="w">    </span><span class="n">memberId</span><span class="p">:</span><span class="w"> </span><span class="kt">Long</span><span class="p">,</span>
+<span class="w">    </span><span class="n">mode</span><span class="p">:</span><span class="w"> </span><span class="n">CouponIssueMode</span><span class="p">,</span>
+<span class="p">):</span><span class="w"> </span><span class="n">IssuedCoupon</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kd">val</span><span class="w"> </span><span class="nv">now</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">now</span><span class="p">()</span>
+<span class="w">    </span><span class="kd">val</span><span class="w"> </span><span class="nv">couponEvent</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">findCouponEvent</span><span class="p">(</span><span class="n">couponEventId</span><span class="p">)</span>
+<span class="w">    </span><span class="n">couponEvent</span><span class="p">.</span><span class="na">checkIssueMode</span><span class="p">(</span><span class="n">mode</span><span class="p">)</span>
+<span class="w">    </span><span class="c1">// 여기서 읽은 수량은 곧 낡지만, "이미 소진"이라면 되돌아가지 않으므로 바로 거절해도 된다</span>
+<span class="w">    </span><span class="n">couponEvent</span><span class="p">.</span><span class="na">checkIssuable</span><span class="p">(</span><span class="n">now</span><span class="p">)</span>
+<span class="w">    </span><span class="n">checkNotIssued</span><span class="p">(</span><span class="n">couponEventId</span><span class="p">,</span><span class="w"> </span><span class="n">memberId</span><span class="p">)</span>
+
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">couponEventRepository</span><span class="p">.</span><span class="na">increaseIssuedQuantity</span><span class="p">(</span><span class="n">couponEventId</span><span class="p">,</span><span class="w"> </span><span class="n">mode</span><span class="p">,</span><span class="w"> </span><span class="n">now</span><span class="p">)</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="m">0</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="c1">// 방식·기간은 같은 now 로 위에서 확인했으므로 남은 이유는 소진뿐이다</span>
+<span class="w">        </span><span class="k">throw</span><span class="w"> </span><span class="n">ServiceException</span><span class="p">(</span><span class="n">ErrorCode</span><span class="p">.</span><span class="na">COUPON_SOLD_OUT</span><span class="p">)</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">    </span><span class="c1">// UPDATE 는 영속성 컨텍스트를 거치지 않으므로 couponEvent 의 수량은 낡은 값이다. 유효기간만 쓴다</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="n">saveIssuedCoupon</span><span class="p">(</span><span class="n">couponEvent</span><span class="p">,</span><span class="w"> </span><span class="n">memberId</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></div>
+</figure>
+<p>주석의 판단을 풀어 봅니다.</p>
+<ul>
+<li><strong>잠금 구간 줄이기</strong>: 모든 발급이 이벤트 행 하나에 줄을 섭니다. 행을 잠근 뒤(UPDATE) 커밋까지가 짧을수록 다음 사람이 빨리 들어갑니다. 그래서 잠그지 않아도 되는 읽기(이벤트 조회, 중복 확인)는 UPDATE 전에 합니다.</li>
+<li><strong>INSERT 를 더 앞으로 당기지 않은 이유</strong>: 발급 내역 INSERT 를 UPDATE 보다 먼저 하면 잠금 구간이 더 줄지만, 같은 회원의 요청 셋이 unique 키에서 엉키면 데드락이 날 수 있습니다. 빠름보다 안전을 골랐습니다.</li>
+<li><strong>&quot;이미 소진&quot;은 되돌아가지 않는다</strong>: 발급 취소 기능이 없으므로, 한 번 소진이면 영원히 소진입니다. 그래서 잠그지 않고 읽은(곧 낡을) 값으로도 &quot;소진&quot;이면 바로 거절해도 안전합니다. 반대로 &quot;남아 있음&quot;은 믿지 않고 UPDATE 로 다시 확인합니다.</li>
+</ul>
+<h3 id="2-4-낙관적-락--충돌이-드물면-잠그지-않는다">2-4. 낙관적 락 — 충돌이 드물면 잠그지 않는다 <a class="header-anchor" href="#2-4-낙관적-락--충돌이-드물면-잠그지-않는다">#</a></h3>
+<p>쿠폰 <strong>사용</strong>은 &quot;한 사람이 자기 쿠폰 한 장을 쓰는&quot; 일이라 충돌이 거의 없습니다. 매번 잠그는 대신, 바꿀 때 &quot;내가 읽은 버전 그대로인가&quot;만 확인합니다.</p>
+<figure class="code-block"><figcaption><span class="code-lang">Kotlin</span><button type="button" class="copy-button" aria-label="코드 복사">복사</button></figcaption><div class="highlight"><pre><span></span><code><span class="c1">// IssuedCoupon.kt</span>
+<span class="w">    </span><span class="nd">@Version</span>
+<span class="w">    </span><span class="kd">var</span><span class="w"> </span><span class="nv">version</span><span class="p">:</span><span class="w"> </span><span class="kt">Long</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="m">0L</span>
+<span class="w">        </span><span class="n">protected</span><span class="w"> </span><span class="k">set</span>
+</code></pre></div>
+</figure>
+<p><a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/main/kotlin/com/site/domain/coupon/service/CouponWalletService.kt#L39-L62" target="_blank" rel="noopener">CouponWalletService.kt</a></p>
+<figure class="code-block"><figcaption><span class="code-lang">Kotlin</span><button type="button" class="copy-button" aria-label="코드 복사">복사</button></figcaption><div class="highlight"><pre><span></span><code><span class="cm">/**</span>
+<span class="cm"> * 쿠폰을 쓴다. 같은 쿠폰으로 동시에 두 번 요청하면 먼저 커밋한 쪽만 성공한다. (낙관적 락)</span>
+<span class="cm"> *</span>
+<span class="cm"> * saveAndFlush 로 이 메서드 안에서 UPDATE 를 실행시킨다. 커밋 시점까지 미루면 버전 충돌 예외가</span>
+<span class="cm"> * 메서드가 끝난 뒤(트랜잭션 프록시)에서 터져서 "이미 사용한 쿠폰"으로 바꿔 줄 수 없다.</span>
+<span class="cm"> */</span>
+<span class="nd">@Transactional</span>
+<span class="kd">fun</span><span class="w"> </span><span class="nf">use</span><span class="p">(</span>
+<span class="w">    </span><span class="n">memberId</span><span class="p">:</span><span class="w"> </span><span class="kt">Long</span><span class="p">,</span>
+<span class="w">    </span><span class="n">issuedCouponId</span><span class="p">:</span><span class="w"> </span><span class="kt">Long</span><span class="p">,</span>
+<span class="w">    </span><span class="n">orderAmount</span><span class="p">:</span><span class="w"> </span><span class="kt">Int</span><span class="p">,</span>
+<span class="p">):</span><span class="w"> </span><span class="n">CouponUsage</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kd">val</span><span class="w"> </span><span class="nv">coupon</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">issuedCouponRepository</span><span class="p">.</span><span class="na">findByIdOrNull</span><span class="p">(</span><span class="n">issuedCouponId</span><span class="p">)</span>
+<span class="w">        </span><span class="o">?.</span><span class="na">takeIf</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nb">it</span><span class="p">.</span><span class="na">isOwnedBy</span><span class="p">(</span><span class="n">memberId</span><span class="p">)</span><span class="w"> </span><span class="p">}</span><span class="w"> </span><span class="c1">// 남의 쿠폰은 "없는 쿠폰"으로 응답한다 (존재 여부를 알려주지 않는다)</span>
+<span class="w">        </span><span class="o">?:</span><span class="w"> </span><span class="k">throw</span><span class="w"> </span><span class="n">ServiceException</span><span class="p">(</span><span class="n">ErrorCode</span><span class="p">.</span><span class="na">ISSUED_COUPON_NOT_FOUND</span><span class="p">)</span>
+<span class="w">    </span><span class="kd">val</span><span class="w"> </span><span class="nv">couponEvent</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">couponEventRepository</span><span class="p">.</span><span class="na">findByIdOrNull</span><span class="p">(</span><span class="n">coupon</span><span class="p">.</span><span class="na">couponEventId</span><span class="p">)</span>
+<span class="w">        </span><span class="o">?:</span><span class="w"> </span><span class="k">throw</span><span class="w"> </span><span class="n">ServiceException</span><span class="p">(</span><span class="n">ErrorCode</span><span class="p">.</span><span class="na">COUPON_EVENT_NOT_FOUND</span><span class="p">)</span>
+
+<span class="w">    </span><span class="kd">val</span><span class="w"> </span><span class="nv">discountAmount</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">coupon</span><span class="p">.</span><span class="na">use</span><span class="p">(</span><span class="n">orderAmount</span><span class="p">,</span><span class="w"> </span><span class="n">couponEvent</span><span class="p">.</span><span class="na">discount</span><span class="p">,</span><span class="w"> </span><span class="n">LocalDateTime</span><span class="p">.</span><span class="na">now</span><span class="p">(</span><span class="n">clock</span><span class="p">))</span>
+<span class="w">    </span><span class="k">try</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">issuedCouponRepository</span><span class="p">.</span><span class="na">saveAndFlush</span><span class="p">(</span><span class="n">coupon</span><span class="p">)</span>
+<span class="w">    </span><span class="p">}</span><span class="w"> </span><span class="k">catch</span><span class="w"> </span><span class="p">(</span><span class="n">e</span><span class="p">:</span><span class="w"> </span><span class="n">ObjectOptimisticLockingFailureException</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="k">throw</span><span class="w"> </span><span class="n">ServiceException</span><span class="p">(</span><span class="n">ErrorCode</span><span class="p">.</span><span class="na">ALREADY_USED_COUPON</span><span class="p">)</span>
+<span class="w">    </span><span class="p">}</span>
+</code></pre></div>
+</figure>
+<p>Hibernate 는 <code>UPDATE issued_coupon SET ..., version = 1 WHERE id = ? AND version = 0</code> 을 보냅니다. 0건이면 누가 먼저 바꾼 것이므로 예외를 냅니다.</p>
+<p><strong>선착순 발급에 낙관적 락을 쓰지 않은 이유</strong>: 오픈 순간에는 모든 요청이 같은 행을 바꿉니다. 충돌이 &quot;드물지 않고 항상&quot; 일어나서, 대부분이 실패하고 재시도하게 됩니다.</p>
+<h2 id="3-transactional-이-동작하는-방식--프록시와-self-invocation">3. <code>@Transactional</code> 이 동작하는 방식 — 프록시와 self-invocation <a class="header-anchor" href="#3-transactional-이-동작하는-방식--프록시와-self-invocation">#</a></h2>
+<p><code>@Transactional</code>, <code>@DistributedLock</code>, <code>@Async</code> 는 모두 <strong>프록시</strong>가 처리합니다.</p>
+<figure class="diagram"><pre class="mermaid" data-source="flowchart LR
+    Caller[&quot;CouponIssueFacade&quot;] --&gt; Proxy[&quot;CouponIssueService 프록시&lt;br/&gt;(락·트랜잭션을 끼워 넣음)&quot;] --&gt; Real[&quot;CouponIssueService&lt;br/&gt;실제 객체&quot;]
+    Real -.-&gt;|&quot;this.issueWith...()&lt;br/&gt;프록시를 거치지 않음&quot;| Real
+">flowchart LR
+    Caller[&quot;CouponIssueFacade&quot;] --&gt; Proxy[&quot;CouponIssueService 프록시&lt;br/&gt;(락·트랜잭션을 끼워 넣음)&quot;] --&gt; Real[&quot;CouponIssueService&lt;br/&gt;실제 객체&quot;]
+    Real -.-&gt;|&quot;this.issueWith...()&lt;br/&gt;프록시를 거치지 않음&quot;| Real
+</pre></figure>
+<p>밖에서 부르면 프록시를 지나가지만, <strong>같은 클래스 안에서 <code>this.메서드()</code> 로 부르면 프록시를 건너뜁니다.</strong> 애너테이션이 조용히 무시됩니다. 이 프로젝트가 클래스를 나눈 이유 두 곳이 이것입니다.</p>
+<p><a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/main/kotlin/com/site/domain/coupon/service/CouponIssueFacade.kt#L21-L22" target="_blank" rel="noopener">CouponIssueFacade.kt</a></p>
+<figure class="code-block"><figcaption><span class="code-lang">Kotlin</span><button type="button" class="copy-button" aria-label="코드 복사">복사</button></figcaption><div class="highlight"><pre><span></span><code><span class="o">*</span><span class="w"> </span><span class="err">왜</span><span class="w"> </span><span class="n">CouponIssueService</span><span class="w"> </span><span class="err">안에</span><span class="w"> </span><span class="err">두지</span><span class="w"> </span><span class="err">않았나</span><span class="p">:</span><span class="w"> </span><span class="err">같은</span><span class="w"> </span><span class="err">클래스</span><span class="w"> </span><span class="err">안에서</span><span class="w"> </span><span class="n">issueWithDistributedLock</span><span class="w"> </span><span class="err">을</span><span class="w"> </span><span class="err">부르면</span>
+<span class="o">*</span><span class="w"> </span><span class="err">프록시를</span><span class="w"> </span><span class="err">거치지</span><span class="w"> </span><span class="err">않아</span><span class="p">(</span><span class="n">self</span><span class="o">-</span><span class="n">invocation</span><span class="p">)</span><span class="w"> </span><span class="nd">@DistributedLock</span><span class="w"> </span><span class="err">이</span><span class="w"> </span><span class="err">동작하지</span><span class="w"> </span><span class="err">않는다</span><span class="p">.</span>
+</code></pre></div>
+</figure>
+<p><code>NewTransactionRunner</code> 가 Aspect 와 따로 있는 것도 같은 이유입니다(위 인용).</p>
+<h3 id="전파propagation--트랜잭션-안에서-트랜잭션을-부르면">전파(propagation) — 트랜잭션 안에서 트랜잭션을 부르면 <a class="header-anchor" href="#전파propagation--트랜잭션-안에서-트랜잭션을-부르면">#</a></h3>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>전파</th>
+<th>바깥에 트랜잭션이 있으면</th>
+<th>없으면</th>
+<th>이 프로젝트에서</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>REQUIRED</code> (기본)</td>
+<td>합류한다</td>
+<td>새로 연다</td>
+<td>대부분의 서비스</td>
+</tr>
+<tr>
+<td><code>REQUIRES_NEW</code></td>
+<td>바깥을 잠시 멈추고 새로 연다</td>
+<td>새로 연다</td>
+<td>분산락 안쪽 (<code>NewTransactionRunner</code>)</td>
+</tr>
+<tr>
+<td><code>MANDATORY</code></td>
+<td>합류한다</td>
+<td><strong>예외</strong></td>
+<td>Outbox 기록 (<a href="08-async-and-reliability.html">8장</a>)</td>
+</tr>
+</tbody>
+</table></div>
+<p>롤백 규칙: 기본적으로 <code>RuntimeException</code> 이 메서드 밖으로 나가면 롤백합니다. <code>ServiceException</code> 은 <code>RuntimeException</code> 이므로, 발급 중 <code>ALREADY_ISSUED_COUPON</code> 이 나면 앞서 올린 수량도 함께 되돌아갑니다.</p>
+<p><a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/main/kotlin/com/site/domain/coupon/service/CouponIssueService.kt#L143-L144" target="_blank" rel="noopener">CouponIssueService.kt</a></p>
+<figure class="code-block"><figcaption><span class="code-lang">Kotlin</span><button type="button" class="copy-button" aria-label="코드 복사">복사</button></figcaption><div class="highlight"><pre><span></span><code><span class="c1">// 같은 회원의 동시 요청이 checkNotIssued 를 함께 통과해도 unique 제약이 막는다.</span>
+<span class="c1">// 예외가 나면 트랜잭션 전체가 롤백되므로 올려둔 issuedQuantity 도 함께 되돌아간다.</span>
+</code></pre></div>
+</figure>
+<p><code>readOnly = true</code> 는 &quot;이 트랜잭션은 읽기만 한다&quot;는 표시입니다. Hibernate 가 변경 감지를 위한 스냅샷을 만들지 않아 가볍습니다. 서비스 클래스에 <code>@Transactional(readOnly = true)</code> 를 붙이고, 쓰는 메서드에만 <code>@Transactional</code> 을 다시 붙이는 패턴을 씁니다. (<a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/main/kotlin/com/site/domain/coupon/service/CouponEventService.kt" target="_blank" rel="noopener">CouponEventService.kt</a>)</p>
+<p><code>CouponIssueService</code> 는 예외입니다. 클래스에 <code>@Transactional</code> 을 붙이면 분산락 메서드까지 트랜잭션이 바깥에 생겨 2-2 의 순서가 깨집니다. 그래서 메서드마다 붙였습니다. (클래스 주석: &quot;분산락 메서드 때문에 클래스 레벨 @Transactional 을 두지 않고, 메서드마다 붙였다.&quot;)</p>
+<h2 id="4-마지막-방어선--unique-제약">4. 마지막 방어선 — unique 제약 <a class="header-anchor" href="#4-마지막-방어선--unique-제약">#</a></h2>
+<p>같은 회원이 버튼을 연타하면, 두 요청이 &quot;아직 안 받았음&quot; 확인(<code>checkNotIssued</code>)을 동시에 통과할 수 있습니다. 이때는 DB 의 <code>(coupon_event_id, member_id)</code> unique 제약이 막습니다.</p>
+<p><a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/test/kotlin/com/site/domain/coupon/service/CouponIssueConcurrencyTest.kt#L199-L212" target="_blank" rel="noopener">CouponIssueConcurrencyTest.kt</a></p>
+<figure class="code-block"><figcaption><span class="code-lang">Kotlin</span><button type="button" class="copy-button" aria-label="코드 복사">복사</button></figcaption><div class="highlight"><pre><span></span><code><span class="nd">@Test</span>
+<span class="kd">fun</span><span class="w"> </span><span class="err">`같은 회원이 동시에 여러 번 요청하면 </span><span class="nf">unique</span><span class="w"> </span><span class="err">제약으로</span><span class="w"> </span><span class="m">1</span><span class="err">장만</span><span class="w"> </span><span class="err">발급되고</span><span class="p">,</span><span class="w"> </span><span class="err">실패한</span><span class="w"> </span><span class="err">요청의</span><span class="w"> </span><span class="err">수량</span><span class="w"> </span><span class="err">증가는</span><span class="w"> </span><span class="err">롤백된다`</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kd">val</span><span class="w"> </span><span class="nv">result</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">issueConcurrently</span><span class="p">(</span>
+<span class="w">        </span><span class="n">label</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">"같은 회원 중복 요청"</span><span class="p">,</span>
+<span class="w">        </span><span class="n">issue</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">::</span><span class="n">issueWithAtomicUpdate</span><span class="p">,</span>
+<span class="w">        </span><span class="n">requestCount</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="m">20</span><span class="p">,</span>
+<span class="w">        </span><span class="n">memberIdOf</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">SAME_MEMBER_ID</span><span class="w"> </span><span class="p">},</span>
+<span class="w">    </span><span class="p">)</span>
+
+<span class="w">    </span><span class="n">assertEquals</span><span class="p">(</span><span class="m">1</span><span class="p">,</span><span class="w"> </span><span class="n">result</span><span class="p">.</span><span class="na">successCount</span><span class="p">)</span>
+<span class="w">    </span><span class="n">assertEquals</span><span class="p">(</span><span class="m">1L</span><span class="p">,</span><span class="w"> </span><span class="n">result</span><span class="p">.</span><span class="na">issuedCouponCount</span><span class="p">)</span>
+<span class="w">    </span><span class="n">assertEquals</span><span class="p">(</span><span class="m">1</span><span class="p">,</span><span class="w"> </span><span class="n">result</span><span class="p">.</span><span class="na">issuedQuantity</span><span class="p">)</span>
+<span class="w">    </span><span class="n">assertEquals</span><span class="p">(</span><span class="n">mapOf</span><span class="p">(</span><span class="s">"ALREADY_ISSUED_COUPON"</span><span class="w"> </span><span class="n">to</span><span class="w"> </span><span class="m">19</span><span class="p">),</span><span class="w"> </span><span class="n">result</span><span class="p">.</span><span class="na">failReasons</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></div>
+</figure>
+<p>애플리케이션 검사는 <strong>빠른 실패</strong>를 위한 것이고, 정합성은 DB 제약이 지킵니다. 두 겹으로 둡니다.</p>
+<h2 id="5-앞단의-빠른-거절--사전-검사fast-fail">5. 앞단의 빠른 거절 — 사전 검사(fast-fail) <a class="header-anchor" href="#5-앞단의-빠른-거절--사전-검사fast-fail">#</a></h2>
+<p>락이 정확해도 문제가 남습니다. 쿠폰 100장이 다 나간 뒤에 온 1,900명도 <strong>락 앞에 줄을 서서</strong> &quot;소진&quot; 응답을 받으려고 기다립니다. 어차피 실패할 요청이 앞사람의 차례를 늦춥니다.</p>
+<p><a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/main/kotlin/com/site/domain/coupon/service/CouponIssueFacade.kt#L9-L51" target="_blank" rel="noopener">CouponIssueFacade.kt</a></p>
+<figure class="code-block"><figcaption><span class="code-lang">Kotlin</span><button type="button" class="copy-button" aria-label="코드 복사">복사</button></figcaption><div class="highlight"><pre><span></span><code><span class="cm">/**</span>
+<span class="cm"> * 즉시 발급의 입구. 빠른 거절(fast-fail) → 설정한 방식으로 발급.</span>
+<span class="cm"> *</span>
+<span class="cm"> * 빠른 거절이 없으면 쿠폰이 소진된 뒤에도 나머지 요청이 전부 락(또는 행 잠금) 앞에 줄을 서서 "소진" 응답을 기다린다.</span>
+<span class="cm"> * 시작 전·종료·소진·방식 불일치처럼 "어차피 실패할 요청"을 메모리 캐시만 보고 먼저 돌려보낸다. (DB 를 읽지 않는다)</span>
+<span class="cm"> * 이미 받은 회원인지는 여기서 보지 않는다. 회원마다 DB 를 읽어야 하는데, 같은 회원이 다시 요청하는 일은 드물다.</span>
+<span class="cm"> *</span>
+<span class="cm"> * 사전 검사를 통과한 요청만 발급 단계의 동시 실행 제한(CouponIssueBulkhead)을 거친다. 소진 뒤 요청은 자리를 기다리지 않는다.</span>
+<span class="cm"> * 자리를 얻은 뒤에도 한 번 더 확인한다. 줄을 서 있는 사이에 소진되면, 남은 줄이 자리마다 DB 를 한 번씩 거치며 천천히 빠지기 때문이다.</span>
+<span class="cm"> *</span>
+<span class="cm"> * 사전 검사는 최적화일 뿐 정합성은 여전히 발급 단계의 검사가 책임진다. (Double-Checked)</span>
+<span class="cm"> *</span>
+<span class="cm"> * 왜 CouponIssueService 안에 두지 않았나: 같은 클래스 안에서 issueWithDistributedLock 을 부르면</span>
+<span class="cm"> * 프록시를 거치지 않아(self-invocation) @DistributedLock 이 동작하지 않는다.</span>
+<span class="cm"> */</span>
+<span class="nd">@Service</span>
+<span class="kd">class</span><span class="w"> </span><span class="nc">CouponIssueFacade</span><span class="p">(</span>
+<span class="w">    </span><span class="kd">private</span><span class="w"> </span><span class="kd">val</span><span class="w"> </span><span class="nv">startedCouponEvents</span><span class="p">:</span><span class="w"> </span><span class="n">StartedCouponEventCache</span><span class="p">,</span>
+<span class="w">    </span><span class="kd">private</span><span class="w"> </span><span class="kd">val</span><span class="w"> </span><span class="nv">couponIssueService</span><span class="p">:</span><span class="w"> </span><span class="n">CouponIssueService</span><span class="p">,</span>
+<span class="w">    </span><span class="kd">private</span><span class="w"> </span><span class="kd">val</span><span class="w"> </span><span class="nv">bulkhead</span><span class="p">:</span><span class="w"> </span><span class="n">CouponIssueBulkhead</span><span class="p">,</span>
+<span class="w">    </span><span class="kd">private</span><span class="w"> </span><span class="kd">val</span><span class="w"> </span><span class="nv">properties</span><span class="p">:</span><span class="w"> </span><span class="n">CouponIssueProperties</span><span class="p">,</span>
+<span class="w">    </span><span class="kd">private</span><span class="w"> </span><span class="kd">val</span><span class="w"> </span><span class="nv">metrics</span><span class="p">:</span><span class="w"> </span><span class="n">CouponIssueMetrics</span><span class="p">,</span>
+<span class="p">)</span><span class="w"> </span><span class="p">{</span>
+
+<span class="w">    </span><span class="kd">fun</span><span class="w"> </span><span class="nf">issue</span><span class="p">(</span><span class="n">couponEventId</span><span class="p">:</span><span class="w"> </span><span class="kt">Long</span><span class="p">,</span><span class="w"> </span><span class="n">memberId</span><span class="p">:</span><span class="w"> </span><span class="kt">Long</span><span class="p">):</span><span class="w"> </span><span class="n">IssuedCoupon</span><span class="w"> </span><span class="o">=</span>
+<span class="w">        </span><span class="k">try</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="n">startedCouponEvents</span><span class="p">.</span><span class="na">checkIssuable</span><span class="p">(</span><span class="n">couponEventId</span><span class="p">,</span><span class="w"> </span><span class="n">CouponIssueMode</span><span class="p">.</span><span class="na">DIRECT</span><span class="p">)</span>
+<span class="w">            </span><span class="n">bulkhead</span><span class="p">.</span><span class="na">execute</span><span class="w"> </span><span class="p">{</span>
+<span class="w">                </span><span class="c1">// 자리를 기다리는 사이에 소진됐을 수 있다. 메모리에서 다시 확인해, 소진 뒤 줄은 DB 를 거치지 않고 바로 빠지게 한다</span>
+<span class="w">                </span><span class="n">startedCouponEvents</span><span class="p">.</span><span class="na">checkIssuable</span><span class="p">(</span><span class="n">couponEventId</span><span class="p">,</span><span class="w"> </span><span class="n">CouponIssueMode</span><span class="p">.</span><span class="na">DIRECT</span><span class="p">)</span>
+<span class="w">                </span><span class="k">when</span><span class="w"> </span><span class="p">(</span><span class="n">properties</span><span class="p">.</span><span class="na">directStrategy</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">                    </span><span class="n">DirectIssueStrategy</span><span class="p">.</span><span class="na">ATOMIC_UPDATE</span><span class="w"> </span><span class="o">-&gt;</span><span class="w"> </span><span class="n">couponIssueService</span><span class="p">.</span><span class="na">issueWithAtomicUpdate</span><span class="p">(</span><span class="n">couponEventId</span><span class="p">,</span><span class="w"> </span><span class="n">memberId</span><span class="p">,</span><span class="w"> </span><span class="n">CouponIssueMode</span><span class="p">.</span><span class="na">DIRECT</span><span class="p">)</span>
+<span class="w">                    </span><span class="n">DirectIssueStrategy</span><span class="p">.</span><span class="na">DISTRIBUTED_LOCK</span><span class="w"> </span><span class="o">-&gt;</span><span class="w"> </span><span class="n">couponIssueService</span><span class="p">.</span><span class="na">issueWithDistributedLock</span><span class="p">(</span><span class="n">couponEventId</span><span class="p">,</span><span class="w"> </span><span class="n">memberId</span><span class="p">)</span>
+<span class="w">                </span><span class="p">}</span>
+<span class="w">            </span><span class="p">}.</span><span class="na">also</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">metrics</span><span class="p">.</span><span class="na">recordDirectIssued</span><span class="p">()</span><span class="w"> </span><span class="p">}</span>
+<span class="w">        </span><span class="p">}</span><span class="w"> </span><span class="k">catch</span><span class="w"> </span><span class="p">(</span><span class="n">e</span><span class="p">:</span><span class="w"> </span><span class="n">ServiceException</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">e</span><span class="p">.</span><span class="na">errorCode</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="n">ErrorCode</span><span class="p">.</span><span class="na">COUPON_SOLD_OUT</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">                </span><span class="n">startedCouponEvents</span><span class="p">.</span><span class="na">markSoldOut</span><span class="p">(</span><span class="n">couponEventId</span><span class="p">)</span>
+<span class="w">            </span><span class="p">}</span>
+<span class="w">            </span><span class="n">metrics</span><span class="p">.</span><span class="na">recordDirectFailed</span><span class="p">(</span><span class="n">e</span><span class="p">.</span><span class="na">errorCode</span><span class="p">)</span>
+<span class="w">            </span><span class="k">throw</span><span class="w"> </span><span class="n">e</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+</figure>
+<figure class="diagram"><pre class="mermaid" data-source="flowchart TD
+    R[&quot;발급 요청&quot;] --&gt; C{&quot;메모리 캐시&lt;br/&gt;시작 전·종료·소진·방식?&quot;}
+    C --&gt;|&quot;어차피 실패&quot;| F[&quot;즉시 거절&lt;br/&gt;(DB·락 없음)&quot;]
+    C --&gt;|&quot;통과&quot;| B[&quot;동시 실행 제한&lt;br/&gt;자리 5개, 먼저 온 순서&quot;]
+    B --&gt; C2{&quot;자리를 얻은 뒤&lt;br/&gt;소진 다시 확인&quot;}
+    C2 --&gt;|&quot;소진&quot;| F
+    C2 --&gt;|&quot;통과&quot;| S{&quot;direct-strategy&quot;}
+    S --&gt;|&quot;ATOMIC_UPDATE (기본)&quot;| A[&quot;원자적 UPDATE&quot;]
+    S --&gt;|&quot;DISTRIBUTED_LOCK&quot;| L[&quot;분산락 + 트랜잭션&quot;]
+    A --&gt; X{&quot;결과&quot;}
+    L --&gt; X
+    X --&gt;|&quot;COUPON_SOLD_OUT&quot;| M[&quot;캐시에 소진 표시&quot;]
+    X --&gt;|&quot;성공&quot;| OK[&quot;201&quot;]
+">flowchart TD
+    R[&quot;발급 요청&quot;] --&gt; C{&quot;메모리 캐시&lt;br/&gt;시작 전·종료·소진·방식?&quot;}
+    C --&gt;|&quot;어차피 실패&quot;| F[&quot;즉시 거절&lt;br/&gt;(DB·락 없음)&quot;]
+    C --&gt;|&quot;통과&quot;| B[&quot;동시 실행 제한&lt;br/&gt;자리 5개, 먼저 온 순서&quot;]
+    B --&gt; C2{&quot;자리를 얻은 뒤&lt;br/&gt;소진 다시 확인&quot;}
+    C2 --&gt;|&quot;소진&quot;| F
+    C2 --&gt;|&quot;통과&quot;| S{&quot;direct-strategy&quot;}
+    S --&gt;|&quot;ATOMIC_UPDATE (기본)&quot;| A[&quot;원자적 UPDATE&quot;]
+    S --&gt;|&quot;DISTRIBUTED_LOCK&quot;| L[&quot;분산락 + 트랜잭션&quot;]
+    A --&gt; X{&quot;결과&quot;}
+    L --&gt; X
+    X --&gt;|&quot;COUPON_SOLD_OUT&quot;| M[&quot;캐시에 소진 표시&quot;]
+    X --&gt;|&quot;성공&quot;| OK[&quot;201&quot;]
+</pre></figure>
+<p>가운데의 <strong>동시 실행 제한(bulkhead)</strong> 은 M5 에서 더해졌습니다. 원자적 UPDATE 는 행 잠금을 기다리는 동안 DB 커넥션을 쥐므로, 발급이 커넥션을 최대 5개까지만 쓰게 해서 같은 풀을 쓰는 다른 API 의 몫을 남깁니다. 자리를 기다리는 사이에 소진될 수 있어서, 자리를 얻은 뒤 캐시를 한 번 더 봅니다. 왜 필요했고 어떻게 확인했는지는 <a href="13-virtual-threads-and-backpressure.html">13장</a>에 있습니다.</p>
+<h3 id="사전-검사는-왜-db-를-읽지-않아도-되나">사전 검사는 왜 DB 를 읽지 않아도 되나 <a class="header-anchor" href="#사전-검사는-왜-db-를-읽지-않아도-되나">#</a></h3>
+<p><a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/main/kotlin/com/site/domain/coupon/service/StartedCouponEventCache.kt#L18-L55" target="_blank" rel="noopener">StartedCouponEventCache.kt</a></p>
+<figure class="code-block"><figcaption><span class="code-lang">Kotlin</span><button type="button" class="copy-button" aria-label="코드 복사">복사</button></figcaption><div class="highlight"><pre><span></span><code><span class="cm">/**</span>
+<span class="cm"> * 발급 요청의 빠른 거절(fast-fail)을 DB 없이 하기 위한 캐시. 즉시 발급과 대기열 줄 서기가 함께 쓴다.</span>
+<span class="cm"> *</span>
+<span class="cm"> * - 시작된 이벤트는 수정·삭제가 막혀 있으므로(2단계 규칙) 발급 방식과 기간은 바뀔 일이 없다. 처음 한 번만 DB 에서 읽는다.</span>
+<span class="cm"> *   시작 전 이벤트는 아직 바뀔 수 있으므로 캐시하지 않는다.</span>
+<span class="cm"> * - 소진은 한 번 확인되면 되돌아가지 않는다. (발급 취소가 없다) 그래서 소진을 본 뒤로는 DB 를 묻지 않고 바로 거절한다.</span>
+<span class="cm"> *</span>
+<span class="cm"> * 서버마다 따로 가지는 캐시다. 다른 서버가 먼저 소진을 봤더라도 이 서버는 스스로 한 번 보기 전까지 모를 뿐이고,</span>
+<span class="cm"> * 그 사이 요청은 발급 단계(락 안 검사, 원자적 UPDATE)에서 거절되므로 정합성에는 영향이 없다.</span>
+<span class="cm"> */</span>
+<span class="nd">@Component</span>
+<span class="kd">class</span><span class="w"> </span><span class="nc">StartedCouponEventCache</span><span class="p">(</span>
+<span class="w">    </span><span class="kd">private</span><span class="w"> </span><span class="kd">val</span><span class="w"> </span><span class="nv">couponEventRepository</span><span class="p">:</span><span class="w"> </span><span class="n">CouponEventRepository</span><span class="p">,</span>
+<span class="w">    </span><span class="kd">private</span><span class="w"> </span><span class="kd">val</span><span class="w"> </span><span class="nv">clock</span><span class="p">:</span><span class="w"> </span><span class="n">Clock</span><span class="p">,</span>
+<span class="p">)</span><span class="w"> </span><span class="p">{</span>
+
+<span class="w">    </span><span class="kd">private</span><span class="w"> </span><span class="kd">val</span><span class="w"> </span><span class="nv">events</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">ConcurrentHashMap</span><span class="o">&lt;</span><span class="kt">Long</span><span class="p">,</span><span class="w"> </span><span class="n">StartedCouponEvent</span><span class="o">&gt;</span><span class="p">()</span>
+
+<span class="w">    </span><span class="cm">/** 지금 DB 에서 읽고 있는 이벤트. 같은 이벤트를 읽으려는 다른 요청은 새로 읽지 않고 이 결과를 기다린다 */</span>
+<span class="w">    </span><span class="kd">private</span><span class="w"> </span><span class="kd">val</span><span class="w"> </span><span class="nv">loading</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">ConcurrentHashMap</span><span class="o">&lt;</span><span class="kt">Long</span><span class="p">,</span><span class="w"> </span><span class="n">CompletableFuture</span><span class="o">&lt;</span><span class="n">StartedCouponEvent</span><span class="o">&gt;&gt;</span><span class="p">()</span>
+
+<span class="w">    </span><span class="cm">/** 지금 [mode] 방식으로 발급을 시도해도 되는지 확인한다. 통과해도 발급이 보장되지는 않는다. */</span>
+<span class="w">    </span><span class="kd">fun</span><span class="w"> </span><span class="nf">checkIssuable</span><span class="p">(</span><span class="n">couponEventId</span><span class="p">:</span><span class="w"> </span><span class="kt">Long</span><span class="p">,</span><span class="w"> </span><span class="n">mode</span><span class="p">:</span><span class="w"> </span><span class="n">CouponIssueMode</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="kd">val</span><span class="w"> </span><span class="nv">now</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">LocalDateTime</span><span class="p">.</span><span class="na">now</span><span class="p">(</span><span class="n">clock</span><span class="p">)</span>
+<span class="w">        </span><span class="kd">val</span><span class="w"> </span><span class="nv">event</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">events</span><span class="o">[</span><span class="n">couponEventId</span><span class="o">]</span><span class="w"> </span><span class="o">?:</span><span class="w"> </span><span class="n">loadOnce</span><span class="p">(</span><span class="n">couponEventId</span><span class="p">,</span><span class="w"> </span><span class="n">now</span><span class="p">)</span>
+
+<span class="w">        </span><span class="n">event</span><span class="p">.</span><span class="na">issueMode</span><span class="p">.</span><span class="na">checkRequested</span><span class="p">(</span><span class="n">mode</span><span class="p">)</span>
+<span class="w">        </span><span class="kd">val</span><span class="w"> </span><span class="nv">status</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">event</span><span class="p">.</span><span class="na">status</span><span class="p">(</span><span class="n">now</span><span class="p">)</span>
+<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">status</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="n">CouponEventStatus</span><span class="p">.</span><span class="na">ENDED</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="n">events</span><span class="p">.</span><span class="na">remove</span><span class="p">(</span><span class="n">couponEventId</span><span class="p">)</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="w">        </span><span class="n">status</span><span class="p">.</span><span class="na">checkIssuable</span><span class="p">()</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="cm">/** 발급 단계에서 소진을 확인했을 때 부른다. 이후 이 이벤트의 요청은 DB 를 거치지 않고 거절된다. */</span>
+<span class="w">    </span><span class="kd">fun</span><span class="w"> </span><span class="nf">markSoldOut</span><span class="p">(</span><span class="n">couponEventId</span><span class="p">:</span><span class="w"> </span><span class="kt">Long</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">events</span><span class="p">.</span><span class="na">computeIfPresent</span><span class="p">(</span><span class="n">couponEventId</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">_</span><span class="p">,</span><span class="w"> </span><span class="n">event</span><span class="w"> </span><span class="o">-&gt;</span><span class="w"> </span><span class="n">event</span><span class="p">.</span><span class="na">copy</span><span class="p">(</span><span class="n">soldOut</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="kc">true</span><span class="p">)</span><span class="w"> </span><span class="p">}</span>
+<span class="w">    </span><span class="p">}</span>
+</code></pre></div>
+</figure>
+<p>캐시가 안전한 이유는 <strong>도메인 규칙</strong>에서 나옵니다.</p>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>캐시하는 것</th>
+<th>왜 낡지 않나</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>발급 방식, 기간</td>
+<td>시작된 이벤트는 수정할 수 없다 (<code>checkModifiable</code>, 4장)</td>
+</tr>
+<tr>
+<td>소진</td>
+<td>발급 취소가 없어 소진은 되돌아가지 않는다</td>
+</tr>
+<tr>
+<td>(캐시 안 함) 시작 전 이벤트</td>
+<td>아직 수정될 수 있다</td>
+</tr>
+<tr>
+<td>(캐시 안 함) 남은 수량</td>
+<td>계속 바뀐다. 발급 단계가 매번 확인한다</td>
+</tr>
+</tbody>
+</table></div>
+<p>캐시를 쓸 때는 &quot;언제 낡는가&quot;를 먼저 묻고, 낡지 않는 것만 담는 것이 가장 안전합니다.</p>
+<p>캐시를 처음 채울 때도 조심해야 합니다. 오픈 순간에는 캐시가 비어 있어서, 동시에 들어온 요청이 각자 DB 를 읽으면 그 수만큼 커넥션 풀에 줄을 섭니다. 그래서 <strong>같은 이벤트는 한 요청만 읽고 나머지는 그 결과를 기다리게(single-flight)</strong> 했습니다(<code>loadOnce</code>). 이 문제는 가상 스레드를 켠 뒤 부하 테스트에서 드러났습니다. <a href="13-virtual-threads-and-backpressure.html">13장</a>에서 다룹니다.</p>
+<p>M4 이전에는 사전 검사가 요청마다 DB 를 두 번 읽었습니다(이벤트 조회 + 이미 받았는지). 오픈 순간 그 읽기들이 커넥션 풀에 줄을 서서, 500명 실험에서 커넥션 대기가 75까지 쌓였습니다.</p>
+<h2 id="6-숫자로-비교하기">6. 숫자로 비교하기 <a class="header-anchor" href="#6-숫자로-비교하기">#</a></h2>
+<h3 id="테스트에서-300명-동시-100장-스레드-32개">테스트에서 (300명 동시, 100장, 스레드 32개) <a class="header-anchor" href="#테스트에서-300명-동시-100장-스레드-32개">#</a></h3>
+<p><code>./gradlew test</code> 로그의 &quot;동시 발급 결과&quot; 줄입니다. 한 번 실행한 예이고, 실행마다 다릅니다.</p>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>방식</th>
+<th>발급</th>
+<th>걸린 시간</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>락 없음</td>
+<td><strong>300장 (수량 컬럼 30)</strong></td>
+<td>667ms</td>
+</tr>
+<tr>
+<td>비관적 락</td>
+<td>100장</td>
+<td>477ms</td>
+</tr>
+<tr>
+<td>분산락</td>
+<td>100장</td>
+<td>1,316ms</td>
+</tr>
+<tr>
+<td>원자적 UPDATE</td>
+<td>100장</td>
+<td>311ms</td>
+</tr>
+<tr>
+<td>사전 검사 + 원자적 UPDATE</td>
+<td>100장</td>
+<td>285ms</td>
+</tr>
+<tr>
+<td>사전 검사 + 분산락</td>
+<td>100장</td>
+<td>1,110ms</td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="k6-부하-테스트에서-응답-중앙값--p95">k6 부하 테스트에서 (응답 중앙값 / p95) <a class="header-anchor" href="#k6-부하-테스트에서-응답-중앙값--p95">#</a></h3>
+<p><a href="https://github.com/RosieOh/Kopring_Core/blob/main/load-test/README.md" target="_blank" rel="noopener">load-test/README.md</a> 의 M4 측정값입니다.</p>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>쿠폰 · 동시 사용자</th>
+<th>개선 전<br>DB 사전 검사 + 분산락</th>
+<th>분산락<br>+ 캐시 사전 검사</th>
+<th>원자적 UPDATE<br>+ 캐시 사전 검사</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>100장 · 500명</td>
+<td>717ms / 945ms</td>
+<td>552ms / 829ms</td>
+<td>296ms / 342ms</td>
+</tr>
+<tr>
+<td>1,000장 · 2,000명</td>
+<td>4.77s / 5.17s</td>
+<td>4.32s / 4.57s</td>
+<td>1.92s / 2.01s</td>
+</tr>
+<tr>
+<td>1,000장 · 5,000명</td>
+<td>5.78s / 6.87s</td>
+<td>5.60s / 5.87s</td>
+<td>2.27s / 2.39s</td>
+</tr>
+<tr>
+<td>DB 커넥션 대기 최대</td>
+<td>0 ~ 66</td>
+<td>0</td>
+<td>0 ~ <strong>110</strong></td>
+</tr>
+</tbody>
+</table></div>
+<p>읽는 법:</p>
+<ul>
+<li>분산락은 발급 한 건마다 &quot;락 획득 → 트랜잭션 → 커밋 → 락 해제&quot;를 차례로 거칩니다. Redis 왕복이 직렬 구간에 들어가서 느립니다.</li>
+<li>원자적 UPDATE 는 줄 서는 구간이 &quot;행 잠금 → INSERT → 커밋&quot;뿐이라 2.4~2.6배 빨랐습니다.</li>
+<li>대신 원자적 UPDATE 는 행 잠금을 <strong>DB 커넥션을 쥔 채</strong> 기다립니다. 커넥션 대기가 110 까지 쌓였습니다. 같은 DB 를 쓰는 다른 API 가 있다면 그쪽이 느려집니다.</li>
+</ul>
+<p>그래서 기본값은 원자적 UPDATE 로 두고, 방식을 설정으로 남겼습니다.</p>
+<p><a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/main/kotlin/com/site/domain/coupon/service/CouponIssueProperties.kt" target="_blank" rel="noopener">CouponIssueProperties.kt</a></p>
+<figure class="code-block"><figcaption><span class="code-lang">Kotlin</span><button type="button" class="copy-button" aria-label="코드 복사">복사</button></figcaption><div class="highlight"><pre><span></span><code><span class="nd">@ConfigurationProperties</span><span class="p">(</span><span class="n">prefix</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">"coupon.issue"</span><span class="p">)</span>
+<span class="kd">data</span><span class="w"> </span><span class="kd">class</span><span class="w"> </span><span class="nc">CouponIssueProperties</span><span class="p">(</span>
+<span class="w">    </span><span class="kd">val</span><span class="w"> </span><span class="nv">directStrategy</span><span class="p">:</span><span class="w"> </span><span class="n">DirectIssueStrategy</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">DirectIssueStrategy</span><span class="p">.</span><span class="na">ATOMIC_UPDATE</span><span class="p">,</span>
+<span class="p">)</span>
+
+<span class="kd">enum</span><span class="w"> </span><span class="kd">class</span><span class="w"> </span><span class="nc">DirectIssueStrategy</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="cm">/** DB 가 UPDATE 한 문장으로 "남아 있으면 +1"을 처리한다. 행 잠금을 기다리는 동안 DB 커넥션을 쥔다. */</span>
+<span class="w">    </span><span class="n">ATOMIC_UPDATE</span><span class="p">,</span>
+
+<span class="w">    </span><span class="cm">/** Redis 락을 잡은 뒤 DB 에서 읽고 판단한다. 락을 기다리는 동안 DB 커넥션은 쓰지 않지만 Redis 왕복이 늘어난다. */</span>
+<span class="w">    </span><span class="n">DISTRIBUTED_LOCK</span><span class="p">,</span>
+<span class="p">}</span>
+</code></pre></div>
+</figure>
+<h2 id="7-언제-무엇을">7. 언제 무엇을 <a class="header-anchor" href="#7-언제-무엇을">#</a></h2>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>상황</th>
+<th>추천</th>
+<th>이유</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>같은 행을 많은 요청이 동시에 바꾼다, DB 를 이 기능이 주로 쓴다</td>
+<td>원자적 UPDATE</td>
+<td>가장 짧은 직렬 구간</td>
+</tr>
+<tr>
+<td>같은 행을 동시에 바꾸지만 DB 커넥션을 아껴야 한다</td>
+<td>분산락</td>
+<td>기다림이 DB 밖</td>
+</tr>
+<tr>
+<td>여러 행·여러 판단을 한 번에 묶어야 한다</td>
+<td>비관적 락</td>
+<td>UPDATE 한 문장으로 표현하기 어렵다 (대기열 일괄 발급)</td>
+</tr>
+<tr>
+<td>충돌이 드물다</td>
+<td>낙관적 락</td>
+<td>평소에는 잠그지 않는다</td>
+</tr>
+<tr>
+<td>몰림이 매우 크다, 순서가 중요하다</td>
+<td>대기열 (<a href="09-redis-queue.html">9장</a>)</td>
+<td>DB 부하를 워커 속도로 고정</td>
+</tr>
+</tbody>
+</table></div>
+<h2 id="흔한-실수">흔한 실수 <a class="header-anchor" href="#흔한-실수">#</a></h2>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>실수</th>
+<th>결과</th>
+<th>대신</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>락을 커밋보다 먼저 푼다</td>
+<td>락을 걸었는데도 Lost Update</td>
+<td>락이 트랜잭션 바깥을 감싸게 (<code>@Order</code>, <code>REQUIRES_NEW</code>)</td>
+</tr>
+<tr>
+<td>같은 클래스 안에서 <code>@Transactional</code> 메서드를 부른다</td>
+<td>트랜잭션이 안 열린다</td>
+<td>다른 빈으로 분리</td>
+</tr>
+<tr>
+<td>분산락 메서드에 <code>@Transactional</code> 을 같이 붙인다</td>
+<td>트랜잭션이 락 바깥에 생긴다</td>
+<td>트랜잭션은 Aspect 가 연다</td>
+</tr>
+<tr>
+<td>락 <code>leaseTime</code> 을 고정값으로 짧게</td>
+<td>작업 중에 락이 풀린다</td>
+<td>watchdog (<code>-1</code>)</td>
+</tr>
+<tr>
+<td>애플리케이션 검사만 믿는다</td>
+<td>검사와 저장 사이의 틈</td>
+<td>DB unique 제약을 같이</td>
+</tr>
+<tr>
+<td>사전 검사 캐시에 바뀌는 값을 담는다</td>
+<td>낡은 값으로 잘못 거절·통과</td>
+<td>바뀌지 않는 값만</td>
+</tr>
+</tbody>
+</table></div>
+<h2 id="직접-해보기">직접 해보기 <a class="header-anchor" href="#직접-해보기">#</a></h2>
+<ol>
+<li><code>issueWithDistributedLock</code> 을 <code>@Transactional</code> 이 붙은 다른 빈의 메서드 안에서 부른다고 해 봅시다. <code>NewTransactionRunner</code> 의 전파가 <code>REQUIRES_NEW</code> 가 아니라 기본값 <code>REQUIRED</code> 였다면 커밋은 언제 일어나나요? 락 해제와 커밋의 순서를 그려 보고, 다음 요청이 무엇을 읽게 되는지 설명해 보세요.</li>
+<li><code>increaseIssuedQuantity</code> 에서 <code>and e.issuedQuantity &lt; e.totalQuantity</code> 를 지우면 어떤 테스트가 깨지나요?</li>
+<li>발급 취소 기능을 추가한다면 <code>StartedCouponEventCache</code> 의 어떤 가정이 깨지나요? 어떻게 고쳐야 할까요?</li>
+<li>쿠폰 사용(<code>CouponWalletService.use</code>)을 비관적 락으로 바꾸면 무엇을 얻고 무엇을 잃나요?</li>
+</ol>
+<p>다음 장: <a href="08-async-and-reliability.html">8장. 비동기와 신뢰성</a></p>
+
+</article>
+<p class="source-link"><a href="https://github.com/RosieOh/Kopring_Core/blob/main/docs/07-concurrency.md" target="_blank" rel="noopener">이 장의 원본 Markdown 보기</a></p>
+<nav class="pager" aria-label="장 이동"><a class="pager-prev" href="06-auth.html"><span>이전</span>6장. 인증</a><a class="pager-next" href="08-async-and-reliability.html"><span>다음</span>8장. 비동기와 신뢰성</a></nav>
+</main>
+<nav class="page-toc" aria-label="이 장의 목차"><p class="page-toc-title">이 장에서</p><ol><li class="toc-level-2"><a href="#1-문제--lost-update">1. 문제 — Lost Update</a></li>
+<li class="toc-level-2"><a href="#2-해법-다섯-가지">2. 해법 다섯 가지</a></li>
+<li class="toc-level-3"><a href="#2-1-비관적-락--행을-잠그고-줄-세우기">2-1. 비관적 락 — 행을 잠그고 줄 세우기</a></li>
+<li class="toc-level-3"><a href="#2-2-분산락--db-밖에서-줄-세우기">2-2. 분산락 — DB 밖에서 줄 세우기</a></li>
+<li class="toc-level-3"><a href="#2-3-원자적-update--db-가-한-문장으로-판단">2-3. 원자적 UPDATE — DB 가 한 문장으로 판단</a></li>
+<li class="toc-level-3"><a href="#2-4-낙관적-락--충돌이-드물면-잠그지-않는다">2-4. 낙관적 락 — 충돌이 드물면 잠그지 않는다</a></li>
+<li class="toc-level-2"><a href="#3-transactional-이-동작하는-방식--프록시와-self-invocation">3. @Transactional 이 동작하는 방식 — 프록시와 self-invocation</a></li>
+<li class="toc-level-3"><a href="#전파propagation--트랜잭션-안에서-트랜잭션을-부르면">전파(propagation) — 트랜잭션 안에서 트랜잭션을 부르면</a></li>
+<li class="toc-level-2"><a href="#4-마지막-방어선--unique-제약">4. 마지막 방어선 — unique 제약</a></li>
+<li class="toc-level-2"><a href="#5-앞단의-빠른-거절--사전-검사fast-fail">5. 앞단의 빠른 거절 — 사전 검사(fast-fail)</a></li>
+<li class="toc-level-3"><a href="#사전-검사는-왜-db-를-읽지-않아도-되나">사전 검사는 왜 DB 를 읽지 않아도 되나</a></li>
+<li class="toc-level-2"><a href="#6-숫자로-비교하기">6. 숫자로 비교하기</a></li>
+<li class="toc-level-3"><a href="#테스트에서-300명-동시-100장-스레드-32개">테스트에서 (300명 동시, 100장, 스레드 32개)</a></li>
+<li class="toc-level-3"><a href="#k6-부하-테스트에서-응답-중앙값--p95">k6 부하 테스트에서 (응답 중앙값 / p95)</a></li>
+<li class="toc-level-2"><a href="#7-언제-무엇을">7. 언제 무엇을</a></li>
+<li class="toc-level-2"><a href="#흔한-실수">흔한 실수</a></li>
+<li class="toc-level-2"><a href="#직접-해보기">직접 해보기</a></li></ol></nav>
+</div>
+</body>
+</html>

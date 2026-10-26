@@ -1,0 +1,386 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>코프링 교재</title>
+<meta name="description" content="선착순 쿠폰 코드로 배우는 Kotlin + Spring Boot">
+<script>try{var t=localStorage.getItem("book-theme");if(t)document.documentElement.dataset.theme=t;}catch(e){}</script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+<link rel="stylesheet" href="assets/book.css">
+<link rel="stylesheet" href="assets/highlight.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11.4.1/dist/mermaid.min.js" defer></script>
+<script src="assets/book.js" defer></script>
+</head>
+<body>
+<a class="skip-link" href="#content">본문으로 건너뛰기</a>
+<header class="topbar">
+  <button type="button" class="menu-button" aria-label="장 목록 열기" aria-expanded="false" aria-controls="sidebar">목차</button>
+  <a class="topbar-title" href="index.html">코프링 교재</a>
+  <button type="button" class="theme-button" aria-label="밝은 화면과 어두운 화면 바꾸기">화면</button>
+</header>
+<div class="layout">
+<aside class="sidebar" id="sidebar">
+  <a class="sidebar-title" href="index.html">코프링 교재<small>선착순 쿠폰으로 배우는 Kotlin + Spring Boot</small></a>
+  <nav aria-label="장 목록"><ol class="chapter-list">
+<li><a href="index.html" aria-current="page">처음에 — 읽는 법과 목차</a></li>
+<li><a href="01-kotlin-basics.html">1장. Kotlin 기초</a></li>
+<li><a href="02-spring-meets-kotlin.html">2장. 스프링이 Kotlin 을 만나면</a></li>
+<li><a href="03-architecture.html">3장. 프로젝트 구조와 계층</a></li>
+<li><a href="04-jpa-with-kotlin.html">4장. JPA 엔티티를 Kotlin 으로</a></li>
+<li><a href="05-web-and-errors.html">5장. 웹 계층과 예외 처리</a></li>
+<li><a href="06-auth.html">6장. 인증</a></li>
+<li><a href="07-concurrency.html">7장. 동시성 제어</a></li>
+<li><a href="08-async-and-reliability.html">8장. 비동기와 신뢰성</a></li>
+<li><a href="09-redis-queue.html">9장. Redis 대기열</a></li>
+<li><a href="10-testing.html">10장. 테스트</a></li>
+<li><a href="11-observability-and-load-test.html">11장. 관측과 부하 테스트</a></li>
+<li><a href="12-next-steps-and-exercises.html">12장. 다음 공부와 연습 문제</a></li>
+<li><a href="13-virtual-threads-and-backpressure.html">13장. 심화: 가상 스레드와 몰림 대응</a></li>
+  </ol></nav>
+</aside>
+<main id="content" class="content">
+<article class="markdown">
+<h1 id="코프링-교재--선착순-쿠폰으로-배우는-kotlin--spring-boot">코프링 교재 — 선착순 쿠폰으로 배우는 Kotlin + Spring Boot <a class="header-anchor" href="#코프링-교재--선착순-쿠폰으로-배우는-kotlin--spring-boot">#</a></h1>
+<p>이 교재는 이 저장소(Kopring_Core)의 <strong>실제 코드</strong>로 Kotlin 과 Spring Boot 를 배웁니다.
+문법을 따로 외우지 않고, &quot;선착순 쿠폰을 1,000명이 동시에 누르면 어떻게 되나&quot; 같은 질문을 따라가며 필요한 개념을 하나씩 꺼냅니다.</p>
+<h2 id="누구를-위한-교재인가">누구를 위한 교재인가 <a class="header-anchor" href="#누구를-위한-교재인가">#</a></h2>
+<ul>
+<li>프로그래밍은 해 봤지만 Kotlin 은 처음이거나 거의 모르는 사람</li>
+<li>Java·Spring 을 조금 써 봤거나, 전혀 몰라도 괜찮습니다. 필요한 Spring 개념은 장마다 처음부터 설명합니다.</li>
+<li>이 저장소를 직접 열어 보면서 읽는 것을 전제로 합니다. 코드 인용 아래의 링크를 눌러 원본 파일을 함께 보세요.</li>
+</ul>
+<h2 id="읽는-법">읽는 법 <a class="header-anchor" href="#읽는-법">#</a></h2>
+<p>장마다 같은 순서로 구성했습니다.</p>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>순서</th>
+<th>내용</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>한 줄 요약</td>
+<td>이 장에서 가져갈 것 하나</td>
+</tr>
+<tr>
+<td>개념</td>
+<td>처음 보는 사람을 위한 설명</td>
+</tr>
+<tr>
+<td>프로젝트 코드로 보기</td>
+<td>저장소 코드를 그대로 옮긴 인용 + 원본 링크</td>
+</tr>
+<tr>
+<td>왜 이렇게 했나 / 흔한 실수</td>
+<td>코드 주석·커밋·부하 테스트에 남은 설계 판단</td>
+</tr>
+<tr>
+<td>직접 해보기</td>
+<td>2~4개의 연습 문제 (힌트는 <a href="12-next-steps-and-exercises.html">12장</a>)</td>
+</tr>
+</tbody>
+</table></div>
+<ul>
+<li>코드 블록 위에 링크가 붙어 있으면 <strong>저장소 코드를 그대로 옮긴 것</strong>입니다.</li>
+<li>저장소에 없는 코드는 <code>// 예시</code> 라고 표시했습니다.</li>
+<li>인용은 M6(코드 리뷰 정리)까지 끝난 코드 기준입니다. 코드가 바뀌면 링크 쪽이 최신입니다.</li>
+<li><strong>브라우저에서 책처럼 읽기</strong>: <a href="index.html">docs/book/index.html</a> 을 브라우저로 여세요. 장 목록·이 장의 목차·이전/다음 장·다크 모드가 있고, 코드는 색칠돼 있습니다. Mermaid 그림과 글꼴은 인터넷이 있을 때 보입니다.</li>
+<li>Markdown 이 원본이고 HTML 은 <a href="https://github.com/RosieOh/Kopring_Core/blob/main/docs/book/build.py" target="_blank" rel="noopener">build.py</a> 가 만듭니다. Markdown 을 고쳤다면 HTML 도 다시 만들어 함께 커밋하세요. CI 가 둘이 맞는지 확인합니다.</li>
+</ul>
+<figure class="code-block"><figcaption><span class="code-lang">Shell</span><button type="button" class="copy-button" aria-label="코드 복사">복사</button></figcaption><div class="highlight"><pre><span></span><code>python3<span class="w"> </span>-m<span class="w"> </span>venv<span class="w"> </span>.venv<span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span>.venv/bin/pip<span class="w"> </span>install<span class="w"> </span>-r<span class="w"> </span>docs/book/requirements.txt<span class="w">   </span><span class="c1"># 처음 한 번</span>
+.venv/bin/python<span class="w"> </span>docs/book/build.py<span class="w">                                             </span><span class="c1"># docs/*.md → docs/book/*.html</span>
+</code></pre></div>
+</figure>
+<h2 id="목차">목차 <a class="header-anchor" href="#목차">#</a></h2>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>장</th>
+<th>제목</th>
+<th>이 장의 질문</th>
+<th>주로 보는 코드</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td><a href="01-kotlin-basics.html">Kotlin 기초</a></td>
+<td>자바 개발자가 Kotlin 에서 처음 막히는 곳은?</td>
+<td><code>CouponEvent</code>, <code>EnqueueResult</code>, <code>JwtAuthenticationFilter</code></td>
+</tr>
+<tr>
+<td>2</td>
+<td><a href="02-spring-meets-kotlin.html">스프링이 Kotlin 을 만나면</a></td>
+<td>Kotlin 으로 Spring 을 쓰려면 무엇을 더 해야 하나?</td>
+<td><code>build.gradle.kts</code>, <code>*Properties</code></td>
+</tr>
+<tr>
+<td>3</td>
+<td><a href="03-architecture.html">프로젝트 구조와 계층</a></td>
+<td>코드를 어디에 두고, 누가 누구를 알아야 하나?</td>
+<td><code>CouponQueueStore</code>, <code>AlimtalkSender</code>, <code>LayerDependencyTest</code></td>
+</tr>
+<tr>
+<td>4</td>
+<td><a href="04-jpa-with-kotlin.html">JPA 엔티티를 Kotlin 으로</a></td>
+<td>DB 테이블을 Kotlin 클래스로 어떻게 옮기나?</td>
+<td><code>CouponEvent</code>, <code>IssuedCoupon</code>, Flyway</td>
+</tr>
+<tr>
+<td>5</td>
+<td><a href="05-web-and-errors.html">웹 계층과 예외 처리</a></td>
+<td>요청을 받고, 검증하고, 에러를 어떻게 돌려주나?</td>
+<td><code>CouponController</code>, <code>ErrorCode</code>, <code>GlobalExceptionHandler</code></td>
+</tr>
+<tr>
+<td>6</td>
+<td><a href="06-auth.html">인증</a></td>
+<td>로그인은 어떻게 유지되고, 훔친 토큰은 어떻게 막나?</td>
+<td><code>SecurityConfig</code>, <code>JwtTokenProvider</code>, <code>AuthService</code></td>
+</tr>
+<tr>
+<td>7</td>
+<td><a href="07-concurrency.html">동시성 제어</a></td>
+<td>100장짜리 쿠폰을 300명이 동시에 누르면?</td>
+<td><code>CouponIssueService</code>, <code>DistributedLockAspect</code></td>
+</tr>
+<tr>
+<td>8</td>
+<td><a href="08-async-and-reliability.html">비동기와 신뢰성</a></td>
+<td>발급 알림을 &quot;반드시 한 번은&quot; 보내려면?</td>
+<td><code>NotificationOutbox*</code></td>
+</tr>
+<tr>
+<td>9</td>
+<td><a href="09-redis-queue.html">Redis 대기열</a></td>
+<td>DB 를 지키면서 줄 선 순서대로 나눠 주려면?</td>
+<td><code>RedisCouponQueueStore</code>, <code>CouponQueueWorker</code></td>
+</tr>
+<tr>
+<td>10</td>
+<td><a href="10-testing.html">테스트</a></td>
+<td>시간·동시성·외부 API 가 얽힌 코드를 어떻게 검증하나?</td>
+<td>Kotest, MockK, Testcontainers</td>
+</tr>
+<tr>
+<td>11</td>
+<td><a href="11-observability-and-load-test.html">관측과 부하 테스트</a></td>
+<td>&quot;빨라졌다&quot;를 숫자로 말하려면?</td>
+<td>Micrometer, Prometheus, k6</td>
+</tr>
+<tr>
+<td>12</td>
+<td><a href="12-next-steps-and-exercises.html">다음 공부와 연습 문제</a></td>
+<td>여기서 어디로 가나? (연습 문제 힌트 포함)</td>
+<td>—</td>
+</tr>
+<tr>
+<td>13</td>
+<td><a href="13-virtual-threads-and-backpressure.html">심화: 가상 스레드와 몰림 대응</a></td>
+<td>스레드 제한을 풀면 빨라질까? 무엇이 대신 무너지나?</td>
+<td><code>CouponIssueBulkhead</code>, <code>SchedulingConfig</code>, <code>StartedCouponEventCache</code></td>
+</tr>
+</tbody>
+</table></div>
+<p><strong>읽는 순서 추천</strong></p>
+<ul>
+<li>빠른 길(하루): 1장 → 3장 → 7장 → 9장</li>
+<li>처음부터(일주일): 1장부터 차례로. 4장과 7장은 코드를 직접 돌려 보며 읽으세요.</li>
+</ul>
+<h2 id="프로젝트-지도">프로젝트 지도 <a class="header-anchor" href="#프로젝트-지도">#</a></h2>
+<p>선착순 쿠폰 발급 시스템입니다. 관리자가 &quot;100장 한정 5천원 할인&quot; 같은 이벤트를 만들고, 회원이 시작 시각에 몰려와 쿠폰을 받습니다.
+받는 방식은 두 가지입니다.</p>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>방식</th>
+<th>흐름</th>
+<th>장점</th>
+<th>대가</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>즉시 발급 <code>DIRECT</code></td>
+<td>요청 → 사전 검사 → DB 발급 → 응답</td>
+<td>결과를 바로 안다</td>
+<td>몰리면 DB 커넥션이 먼저 찬다</td>
+</tr>
+<tr>
+<td>대기열 <code>QUEUE</code></td>
+<td>요청 → Redis 에 줄 서기 → 202 응답 → 워커가 차례로 발급</td>
+<td>DB 부하가 워커 속도로 고정</td>
+<td>결과를 나중에 안다</td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="패키지-구조">패키지 구조 <a class="header-anchor" href="#패키지-구조">#</a></h3>
+<figure class="code-block"><figcaption><span class="code-lang">text</span><button type="button" class="copy-button" aria-label="코드 복사">복사</button></figcaption><div class="highlight"><pre><span></span><code>src/main/kotlin/com/site
+├── SiteApplication.kt          애플리케이션 시작점
+├── domain/                     비즈니스 규칙. 기술(Redis·JWT·알림톡)을 모른다
+│   ├── auth/                   로그인·토큰 재발급·로그아웃 (port = 토큰 저장소 인터페이스)
+│   ├── common/entity/          생성·수정 시각을 가진 공통 엔티티
+│   ├── coupon/
+│   │   ├── entity/             CouponEvent, IssuedCoupon, Discount, EventPeriod ...
+│   │   ├── event/              CouponIssuedEvent (발급됐다는 사실)
+│   │   ├── queue/              대기열 서비스·워커·조회 간격 정책 (port = 대기열 저장소 인터페이스)
+│   │   ├── repository/         Spring Data JPA 리포지토리
+│   │   └── service/            발급(동시성 제어), 이벤트 관리, 내 쿠폰, 사전 검사 캐시
+│   ├── member/                 회원
+│   └── notification/           알림 Outbox (port = 알림톡 발송 인터페이스)
+├── infrastructure/             domain 의 포트를 구현하는 기술 어댑터
+│   ├── async/                  @Async 스레드 풀, @Scheduled 활성화
+│   ├── biztalk/                알림톡 발송 (Solapi / 로그 대체)
+│   ├── database/               JPA Auditing, 로컬 관리자 계정
+│   ├── redis/                  분산락, 대기열, refresh token, 블랙리스트
+│   ├── security/               Spring Security, JWT
+│   └── swagger/                API 문서
+├── presentation/               HTTP 입구 (컨트롤러, 요청·응답 DTO, SSE)
+└── independent/                어느 계층에도 기대지 않는 공통 코드 (에러 코드, 응답 형식, Clock ...)
+</code></pre></div>
+</figure>
+<figure class="diagram"><pre class="mermaid" data-source="flowchart LR
+    P[&quot;presentation&lt;br/&gt;컨트롤러·DTO&quot;] --&gt; D[&quot;domain&lt;br/&gt;엔티티·서비스·포트&quot;]
+    I[&quot;infrastructure&lt;br/&gt;Redis·JWT·알림톡 어댑터&quot;] --&gt; D
+    P --&gt; C[&quot;independent&lt;br/&gt;에러 코드·응답·Clock&quot;]
+    D --&gt; C
+    I --&gt; C
+">flowchart LR
+    P[&quot;presentation&lt;br/&gt;컨트롤러·DTO&quot;] --&gt; D[&quot;domain&lt;br/&gt;엔티티·서비스·포트&quot;]
+    I[&quot;infrastructure&lt;br/&gt;Redis·JWT·알림톡 어댑터&quot;] --&gt; D
+    P --&gt; C[&quot;independent&lt;br/&gt;에러 코드·응답·Clock&quot;]
+    D --&gt; C
+    I --&gt; C
+</pre></figure>
+<p>화살표는 &quot;안다(import 한다)&quot;는 뜻입니다. domain 은 아무 계층도 알지 않고, infrastructure 가 domain 의 인터페이스를 구현합니다. (<a href="03-architecture.html">3장</a>)</p>
+<h3 id="api-한눈에">API 한눈에 <a class="header-anchor" href="#api-한눈에">#</a></h3>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>메서드 · 경로</th>
+<th>하는 일</th>
+<th>권한</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>POST /api/members</code></td>
+<td>회원가입</td>
+<td>누구나</td>
+</tr>
+<tr>
+<td><code>POST /api/auth/login</code> · <code>/reissue</code> · <code>/logout</code></td>
+<td>로그인, 토큰 재발급, 로그아웃</td>
+<td>누구나 / 로그아웃은 로그인 필요</td>
+</tr>
+<tr>
+<td><code>GET /api/members/me</code></td>
+<td>내 정보</td>
+<td>로그인</td>
+</tr>
+<tr>
+<td><code>POST·GET·PUT·DELETE /api/admin/coupon-events</code></td>
+<td>이벤트 등록·조회·수정·삭제</td>
+<td>ADMIN</td>
+</tr>
+<tr>
+<td><code>GET /api/coupon-events</code></td>
+<td>진행 중·예정 이벤트 목록</td>
+<td>로그인</td>
+</tr>
+<tr>
+<td><code>POST /api/coupon-events/{id}/issue</code></td>
+<td>즉시 발급</td>
+<td>로그인</td>
+</tr>
+<tr>
+<td><code>POST /api/coupon-events/{id}/queue</code></td>
+<td>대기열 등록 (202)</td>
+<td>로그인</td>
+</tr>
+<tr>
+<td><code>GET /api/coupon-events/{id}/queue/me</code> · <code>/queue/me/stream</code></td>
+<td>내 대기열 상태 (조회 / SSE)</td>
+<td>로그인</td>
+</tr>
+<tr>
+<td><code>GET /api/members/me/coupons</code> · <code>POST .../{id}/use</code></td>
+<td>내 쿠폰 목록, 쿠폰 사용</td>
+<td>로그인</td>
+</tr>
+</tbody>
+</table></div>
+<h2 id="로컬에서-돌려-보기">로컬에서 돌려 보기 <a class="header-anchor" href="#로컬에서-돌려-보기">#</a></h2>
+<p>필요한 것: JDK 21, Docker.</p>
+<figure class="code-block"><figcaption><span class="code-lang">Shell</span><button type="button" class="copy-button" aria-label="코드 복사">복사</button></figcaption><div class="highlight"><pre><span></span><code>docker<span class="w"> </span>compose<span class="w"> </span>up<span class="w"> </span>-d<span class="w">        </span><span class="c1"># MySQL 8.4(3306) + Redis 7.4(6380)</span>
+./gradlew<span class="w"> </span>bootRun<span class="w">           </span><span class="c1"># local 프로필로 실행 (http://localhost:8080)</span>
+</code></pre></div>
+</figure>
+<ul>
+<li>API 문서: http://localhost:8080/swagger-ui/index.html — 우측 상단 Authorize 에 access token 을 넣습니다.</li>
+<li>관리자 계정: 기동할 때 자동으로 만들어집니다. <code>admin@kopring.local</code> / <code>admin1234!</code> (<a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/main/kotlin/com/site/infrastructure/database/LocalAdminInitializer.kt" target="_blank" rel="noopener">LocalAdminInitializer.kt</a>)</li>
+<li>테이블은 Flyway 가 만듭니다. 직접 만들 필요가 없습니다. (<a href="04-jpa-with-kotlin.html">4장</a>)</li>
+</ul>
+<figure class="code-block"><figcaption><span class="code-lang">Shell</span><button type="button" class="copy-button" aria-label="코드 복사">복사</button></figcaption><div class="highlight"><pre><span></span><code>./gradlew<span class="w"> </span><span class="nb">test</span><span class="w">              </span><span class="c1"># 테스트 (Testcontainers 가 MySQL·Redis 를 Docker 로 띄운다)</span>
+./gradlew<span class="w"> </span>ktlintCheck<span class="w">       </span><span class="c1"># 코드 스타일 검사 (CI 와 같은 조건)</span>
+docker<span class="w"> </span>compose<span class="w"> </span>--profile<span class="w"> </span>monitoring<span class="w"> </span>up<span class="w"> </span>-d<span class="w">   </span><span class="c1"># Prometheus(9090)·Grafana(3000) 까지</span>
+</code></pre></div>
+</figure>
+<p>부하 테스트 실행법과 결과는 <a href="https://github.com/RosieOh/Kopring_Core/blob/main/load-test/README.md" target="_blank" rel="noopener">load-test/README.md</a> 에 있습니다. (<a href="11-observability-and-load-test.html">11장</a>)</p>
+<h2 id="용어">용어 <a class="header-anchor" href="#용어">#</a></h2>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>용어</th>
+<th>뜻</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>이벤트 (<code>CouponEvent</code>)</td>
+<td>&quot;100장 한정 5천원 할인&quot; 같은 쿠폰 발급 행사</td>
+</tr>
+<tr>
+<td>발급 (<code>IssuedCoupon</code>)</td>
+<td>회원 한 명이 받은 쿠폰 한 장</td>
+</tr>
+<tr>
+<td>소진 (<code>SOLD_OUT</code>)</td>
+<td>진행 기간이지만 수량을 다 나눠 준 상태</td>
+</tr>
+<tr>
+<td>포트 / 어댑터</td>
+<td>domain 이 정한 인터페이스 / 그것을 Redis·JWT 등으로 구현한 클래스</td>
+</tr>
+<tr>
+<td>사전 검사 (fast-fail)</td>
+<td>어차피 실패할 요청을 락이나 DB 앞에서 먼저 돌려보내는 것</td>
+</tr>
+<tr>
+<td>Outbox</td>
+<td>&quot;보낼 알림&quot;을 비즈니스 변경과 같은 트랜잭션에 기록해 두는 테이블</td>
+</tr>
+<tr>
+<td>lease</td>
+<td>&quot;이 작업은 내가 처리 중&quot;이라고 잡아 두는 만료 시각. 지나면 남이 가져간다</td>
+</tr>
+</tbody>
+</table></div>
+
+</article>
+<p class="source-link"><a href="https://github.com/RosieOh/Kopring_Core/blob/main/docs/README.md" target="_blank" rel="noopener">이 장의 원본 Markdown 보기</a></p>
+<nav class="pager" aria-label="장 이동"><a class="pager-next" href="01-kotlin-basics.html"><span>다음</span>1장. Kotlin 기초</a></nav>
+</main>
+<nav class="page-toc" aria-label="이 장의 목차"><p class="page-toc-title">이 장에서</p><ol><li class="toc-level-2"><a href="#누구를-위한-교재인가">누구를 위한 교재인가</a></li>
+<li class="toc-level-2"><a href="#읽는-법">읽는 법</a></li>
+<li class="toc-level-2"><a href="#목차">목차</a></li>
+<li class="toc-level-2"><a href="#프로젝트-지도">프로젝트 지도</a></li>
+<li class="toc-level-3"><a href="#패키지-구조">패키지 구조</a></li>
+<li class="toc-level-3"><a href="#api-한눈에">API 한눈에</a></li>
+<li class="toc-level-2"><a href="#로컬에서-돌려-보기">로컬에서 돌려 보기</a></li>
+<li class="toc-level-2"><a href="#용어">용어</a></li></ol></nav>
+</div>
+</body>
+</html>

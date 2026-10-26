@@ -38,3 +38,6 @@ out/
 
 ### Kotlin ###
 .kotlin
+
+# 교재 HTML 을 만들 때 쓰는 Python 가상환경 (docs/book/requirements.txt)
+.venv/
