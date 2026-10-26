@@ -39,6 +39,7 @@ class CouponIssueMetrics(
             ErrorCode.ALREADY_ISSUED_COUPON -> "already_issued"
             ErrorCode.QUEUE_ONLY_COUPON_EVENT -> "mode_mismatch"
             ErrorCode.LOCK_ACQUISITION_FAILED -> "lock_timeout"
+            ErrorCode.COUPON_ISSUE_BUSY -> "busy"
             ErrorCode.COUPON_EVENT_NOT_FOUND -> "not_found"
             else -> "failed"
         }

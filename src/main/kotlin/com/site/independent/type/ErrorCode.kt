@@ -35,4 +35,5 @@ enum class ErrorCode(
     EXPIRED_COUPON(409, "EXPIRED_COUPON", "유효기간이 지난 쿠폰입니다."),
     INTERNAL_SERVER_ERROR(500, "INTERNAL_SERVER_ERROR", "서버 오류가 발생했습니다."),
     LOCK_ACQUISITION_FAILED(503, "LOCK_ACQUISITION_FAILED", "요청이 몰려 처리하지 못했습니다. 잠시 후 다시 시도해주세요."),
+    COUPON_ISSUE_BUSY(503, "COUPON_ISSUE_BUSY", "발급 요청이 몰려 처리하지 못했습니다. 잠시 후 다시 시도해주세요."),
 }

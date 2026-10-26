@@ -132,6 +132,18 @@
       "description": "Outbox 스케줄러 실행 간격(ms)."
     },
     {
+      "name": "coupon.issue.bulkhead.max-concurrent",
+      "type": "java.lang.Integer",
+      "defaultValue": 5,
+      "description": "즉시 발급 단계를 동시에 실행할 수 있는 요청 수. DB 커넥션 풀보다 작게 둬서 다른 API 몫을 남긴다."
+    },
+    {
+      "name": "coupon.issue.bulkhead.max-wait",
+      "type": "java.time.Duration",
+      "defaultValue": "5s",
+      "description": "발급 동시 실행 자리를 기다리는 최대 시간. 넘기면 503(COUPON_ISSUE_BUSY)."
+    },
+    {
       "name": "coupon.issue.direct-strategy",
       "type": "com.site.domain.coupon.service.DirectIssueStrategy",
       "defaultValue": "atomic-update",
