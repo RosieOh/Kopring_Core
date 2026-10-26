@@ -17,8 +17,8 @@
 
 | 주제 | 왜 | 출발점 |
 |---|---|---|
-| 가상 스레드 (Java 21, `spring.threads.virtual.enabled`) | 요청 스레드가 I/O 를 기다리는 동안 OS 스레드를 붙잡지 않는다 | 부하 테스트에서 오픈 순간 Tomcat 스레드 200개가 찼다 ([load-test/README.md](../load-test/README.md) 개선 여지). 켜면 스레드 수 제한이 사라지는 대신, 그만큼의 요청이 DB 커넥션 풀 앞에 몰린다는 점도 함께 보기 |
-| 요청 수 제한 · 동시 실행 제한 (rate limit, bulkhead) | 한 기능이 커넥션 풀을 다 차지하지 않게 | 원자적 UPDATE 의 커넥션 대기 110 ([7장](07-concurrency.md)) |
+| 가상 스레드 (Java 21, `spring.threads.virtual.enabled`) | 요청 스레드가 I/O 를 기다리는 동안 OS 스레드를 붙잡지 않는다 | 이 저장소는 M5 에서 켰다. 무엇이 무너졌고 어떻게 고쳤는지는 [13장](13-virtual-threads-and-backpressure.md). 다음은 JDK 24+ 의 JEP 491(`synchronized` 고정 해소) |
+| 동시 실행 제한 (bulkhead) · 요청 수 제한 (rate limit) | 한 기능이 커넥션 풀을 다 차지하지 않게 / 악의적 반복 요청 막기 | bulkhead 는 M5 에서 했다([13장](13-virtual-threads-and-backpressure.md)). 회원별 rate limit 은 아직 없다 |
 | 서버 여러 대 | 이 프로젝트의 캐시·SSE 연결은 서버마다 따로 있다 | `StartedCouponEventCache`, `CouponQueueStatusStreams` 주석 |
 | 메시지 브로커 (Kafka 등) | Redis 대기열·Outbox 를 더 큰 규모로 | Outbox 테이블을 읽어 브로커로 보내는 구조(CDC)로 발전 |
 
@@ -37,10 +37,11 @@
 
 | 과제 | 배우는 것 | 건드릴 곳 |
 |---|---|---|
-| 대기열 조회 힌트에 남은 수량 반영 | 캐시·Redis 키 설계, 정책 테스트 | `CouponQueuePollingPolicy`, `CouponQueueWorker` |
+| 대기열이 닫히면(소진·종료) SSE 구독자에게 바로 결과 보내기 | 이벤트 기반 알림, 폴링 주기와의 관계 | `CouponQueueStatusStreams`, `CouponQueueWorker` |
 | 이벤트 일시 중지 | 상태 설계, 마이그레이션, **캐시 무효화** | `CouponEvent`, `StartedCouponEventCache`, `V5__...` |
 | 쿠폰 발급 취소 | 수량 되돌리기, "소진은 되돌아가지 않는다" 가정 깨기 | `CouponIssueService`, `StartedCouponEventCache` |
-| 발급 전용 동시 실행 제한 | bulkhead, 측정으로 효과 증명 | `CouponIssueFacade`, k6 시나리오 추가 |
+| 회원별 요청 수 제한 (rate limit) | 토큰 버킷, Redis 로 서버 여러 대에서 함께 세기 | 필터 또는 `CouponIssueFacade`, Redisson `RRateLimiter` |
+| k6 를 다른 기계에서 돌려 M5 를 다시 재기 | 측정 환경 분리, 흔들림을 줄이는 법 | `load-test/`, [13장](13-virtual-threads-and-backpressure.md) 6절 |
 | 추첨(`LOTTERY`) 발급 방식 | enum 확장, sealed·when 의 힘 | `CouponIssueMode` 와 그 `when` 들 |
 
 ## 3. 코드 리뷰 연습 — 이 코드의 약점 찾기

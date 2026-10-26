@@ -40,7 +40,7 @@ sequenceDiagram
 
 쿠폰은 101장 나갔고, 수량 컬럼은 B 가 A 의 결과를 덮어써서 100 입니다. 이것이 **Lost Update** 입니다. 테스트로 재현합니다.
 
-[CouponIssueConcurrencyTest.kt](../src/test/kotlin/com/site/domain/coupon/service/CouponIssueConcurrencyTest.kt#L54-L63)
+[CouponIssueConcurrencyTest.kt](../src/test/kotlin/com/site/domain/coupon/service/CouponIssueConcurrencyTest.kt#L67-L76)
 
 ```kotlin
     @Test
@@ -327,7 +327,7 @@ flowchart LR
 
 밖에서 부르면 프록시를 지나가지만, **같은 클래스 안에서 `this.메서드()` 로 부르면 프록시를 건너뜁니다.** 애너테이션이 조용히 무시됩니다. 이 프로젝트가 클래스를 나눈 이유 두 곳이 이것입니다.
 
-[CouponIssueFacade.kt](../src/main/kotlin/com/site/domain/coupon/service/CouponIssueFacade.kt#L18-L19)
+[CouponIssueFacade.kt](../src/main/kotlin/com/site/domain/coupon/service/CouponIssueFacade.kt#L21-L22)
 
 ```kotlin
  * 왜 CouponIssueService 안에 두지 않았나: 같은 클래스 안에서 issueWithDistributedLock 을 부르면
@@ -346,7 +346,7 @@ flowchart LR
 
 롤백 규칙: 기본적으로 `RuntimeException` 이 메서드 밖으로 나가면 롤백합니다. `ServiceException` 은 `RuntimeException` 이므로, 발급 중 `ALREADY_ISSUED_COUPON` 이 나면 앞서 올린 수량도 함께 되돌아갑니다.
 
-[CouponIssueService.kt](../src/main/kotlin/com/site/domain/coupon/service/CouponIssueService.kt#L141-L142)
+[CouponIssueService.kt](../src/main/kotlin/com/site/domain/coupon/service/CouponIssueService.kt#L142-L143)
 
 ```kotlin
     // 같은 회원의 동시 요청이 checkNotIssued 를 함께 통과해도 unique 제약이 막는다.
@@ -361,7 +361,7 @@ flowchart LR
 
 같은 회원이 버튼을 연타하면, 두 요청이 "아직 안 받았음" 확인(`checkNotIssued`)을 동시에 통과할 수 있습니다. 이때는 DB 의 `(coupon_event_id, member_id)` unique 제약이 막습니다.
 
-[CouponIssueConcurrencyTest.kt](../src/test/kotlin/com/site/domain/coupon/service/CouponIssueConcurrencyTest.kt#L110-L123)
+[CouponIssueConcurrencyTest.kt](../src/test/kotlin/com/site/domain/coupon/service/CouponIssueConcurrencyTest.kt#L199-L212)
 
 ```kotlin
     @Test
@@ -386,7 +386,7 @@ flowchart LR
 
 락이 정확해도 문제가 남습니다. 쿠폰 100장이 다 나간 뒤에 온 1,900명도 **락 앞에 줄을 서서** "소진" 응답을 받으려고 기다립니다. 어차피 실패할 요청이 앞사람의 차례를 늦춥니다.
 
-[CouponIssueFacade.kt](../src/main/kotlin/com/site/domain/coupon/service/CouponIssueFacade.kt#L9-L43)
+[CouponIssueFacade.kt](../src/main/kotlin/com/site/domain/coupon/service/CouponIssueFacade.kt#L9-L51)
 
 ```kotlin
 /**
@@ -395,6 +395,9 @@ flowchart LR
  * 빠른 거절이 없으면 쿠폰이 소진된 뒤에도 나머지 요청이 전부 락(또는 행 잠금) 앞에 줄을 서서 "소진" 응답을 기다린다.
  * 시작 전·종료·소진·방식 불일치처럼 "어차피 실패할 요청"을 메모리 캐시만 보고 먼저 돌려보낸다. (DB 를 읽지 않는다)
  * 이미 받은 회원인지는 여기서 보지 않는다. 회원마다 DB 를 읽어야 하는데, 같은 회원이 다시 요청하는 일은 드물다.
+ *
+ * 사전 검사를 통과한 요청만 발급 단계의 동시 실행 제한(CouponIssueBulkhead)을 거친다. 소진 뒤 요청은 자리를 기다리지 않는다.
+ * 자리를 얻은 뒤에도 한 번 더 확인한다. 줄을 서 있는 사이에 소진되면, 남은 줄이 자리마다 DB 를 한 번씩 거치며 천천히 빠지기 때문이다.
  *
  * 사전 검사는 최적화일 뿐 정합성은 여전히 발급 단계의 검사가 책임진다. (Double-Checked)
  *
@@ -405,6 +408,7 @@ flowchart LR
 class CouponIssueFacade(
     private val startedCouponEvents: StartedCouponEventCache,
     private val couponIssueService: CouponIssueService,
+    private val bulkhead: CouponIssueBulkhead,
     private val properties: CouponIssueProperties,
     private val metrics: CouponIssueMetrics,
 ) {
@@ -412,9 +416,13 @@ class CouponIssueFacade(
     fun issue(couponEventId: Long, memberId: Long): IssuedCoupon =
         try {
             startedCouponEvents.checkIssuable(couponEventId, CouponIssueMode.DIRECT)
-            when (properties.directStrategy) {
-                DirectIssueStrategy.ATOMIC_UPDATE -> couponIssueService.issueWithAtomicUpdate(couponEventId, memberId, CouponIssueMode.DIRECT)
-                DirectIssueStrategy.DISTRIBUTED_LOCK -> couponIssueService.issueWithDistributedLock(couponEventId, memberId)
+            bulkhead.execute {
+                // 자리를 기다리는 사이에 소진됐을 수 있다. 메모리에서 다시 확인해, 소진 뒤 줄은 DB 를 거치지 않고 바로 빠지게 한다
+                startedCouponEvents.checkIssuable(couponEventId, CouponIssueMode.DIRECT)
+                when (properties.directStrategy) {
+                    DirectIssueStrategy.ATOMIC_UPDATE -> couponIssueService.issueWithAtomicUpdate(couponEventId, memberId, CouponIssueMode.DIRECT)
+                    DirectIssueStrategy.DISTRIBUTED_LOCK -> couponIssueService.issueWithDistributedLock(couponEventId, memberId)
+                }
             }.also { metrics.recordDirectIssued() }
         } catch (e: ServiceException) {
             if (e.errorCode == ErrorCode.COUPON_SOLD_OUT) {
@@ -430,7 +438,10 @@ class CouponIssueFacade(
 flowchart TD
     R["발급 요청"] --> C{"메모리 캐시<br/>시작 전·종료·소진·방식?"}
     C -->|"어차피 실패"| F["즉시 거절<br/>(DB·락 없음)"]
-    C -->|"통과"| S{"direct-strategy"}
+    C -->|"통과"| B["동시 실행 제한<br/>자리 5개, 먼저 온 순서"]
+    B --> C2{"자리를 얻은 뒤<br/>소진 다시 확인"}
+    C2 -->|"소진"| F
+    C2 -->|"통과"| S{"direct-strategy"}
     S -->|"ATOMIC_UPDATE (기본)"| A["원자적 UPDATE"]
     S -->|"DISTRIBUTED_LOCK"| L["분산락 + 트랜잭션"]
     A --> X{"결과"}
@@ -439,9 +450,11 @@ flowchart TD
     X -->|"성공"| OK["201"]
 ```
 
+가운데의 **동시 실행 제한(bulkhead)** 은 M5 에서 더해졌습니다. 원자적 UPDATE 는 행 잠금을 기다리는 동안 DB 커넥션을 쥐므로, 발급이 커넥션을 최대 5개까지만 쓰게 해서 같은 풀을 쓰는 다른 API 의 몫을 남깁니다. 자리를 기다리는 사이에 소진될 수 있어서, 자리를 얻은 뒤 캐시를 한 번 더 봅니다. 왜 필요했고 어떻게 확인했는지는 [13장](13-virtual-threads-and-backpressure.md)에 있습니다.
+
 ### 사전 검사는 왜 DB 를 읽지 않아도 되나
 
-[StartedCouponEventCache.kt](../src/main/kotlin/com/site/domain/coupon/service/StartedCouponEventCache.kt#L16-L50)
+[StartedCouponEventCache.kt](../src/main/kotlin/com/site/domain/coupon/service/StartedCouponEventCache.kt#L18-L55)
 
 ```kotlin
 /**
@@ -462,15 +475,13 @@ class StartedCouponEventCache(
 
     private val events = ConcurrentHashMap<Long, StartedCouponEvent>()
 
-    /**
-     * 지금 [mode] 방식으로 발급을 시도해도 되는지 확인한다. 통과해도 발급이 보장되지는 않는다.
-     *
-     * 오픈 직후 처음 몇 ms 동안은 캐시가 비어 있어 동시에 들어온 요청이 각자 DB 를 읽을 수 있다.
-     * 한 요청만 읽게 막으려면(single-flight) 나머지를 기다리게 해야 하는데, 그 정도 중복은 감수하고 단순하게 둔다.
-     */
+    /** 지금 DB 에서 읽고 있는 이벤트. 같은 이벤트를 읽으려는 다른 요청은 새로 읽지 않고 이 결과를 기다린다 */
+    private val loading = ConcurrentHashMap<Long, CompletableFuture<StartedCouponEvent>>()
+
+    /** 지금 [mode] 방식으로 발급을 시도해도 되는지 확인한다. 통과해도 발급이 보장되지는 않는다. */
     fun checkIssuable(couponEventId: Long, mode: CouponIssueMode) {
         val now = LocalDateTime.now(clock)
-        val event = events[couponEventId] ?: load(couponEventId, now)
+        val event = events[couponEventId] ?: loadOnce(couponEventId, now)
 
         event.issueMode.checkRequested(mode)
         val status = event.status(now)
@@ -478,6 +489,11 @@ class StartedCouponEventCache(
             events.remove(couponEventId)
         }
         status.checkIssuable()
+    }
+
+    /** 발급 단계에서 소진을 확인했을 때 부른다. 이후 이 이벤트의 요청은 DB 를 거치지 않고 거절된다. */
+    fun markSoldOut(couponEventId: Long) {
+        events.computeIfPresent(couponEventId) { _, event -> event.copy(soldOut = true) }
     }
 ```
 
@@ -491,6 +507,8 @@ class StartedCouponEventCache(
 | (캐시 안 함) 남은 수량 | 계속 바뀐다. 발급 단계가 매번 확인한다 |
 
 캐시를 쓸 때는 "언제 낡는가"를 먼저 묻고, 낡지 않는 것만 담는 것이 가장 안전합니다.
+
+캐시를 처음 채울 때도 조심해야 합니다. 오픈 순간에는 캐시가 비어 있어서, 동시에 들어온 요청이 각자 DB 를 읽으면 그 수만큼 커넥션 풀에 줄을 섭니다. 그래서 **같은 이벤트는 한 요청만 읽고 나머지는 그 결과를 기다리게(single-flight)** 했습니다(`loadOnce`). 이 문제는 가상 스레드를 켠 뒤 부하 테스트에서 드러났습니다. [13장](13-virtual-threads-and-backpressure.md)에서 다룹니다.
 
 M4 이전에는 사전 검사가 요청마다 DB 를 두 번 읽었습니다(이벤트 조회 + 이미 받았는지). 오픈 순간 그 읽기들이 커넥션 풀에 줄을 서서, 500명 실험에서 커넥션 대기가 75까지 쌓였습니다.
 

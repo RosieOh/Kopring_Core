@@ -128,11 +128,12 @@ class NotificationOutboxEventListener(
 
 ### 스레드 풀 — 넘치면 버린다, 그래도 괜찮다
 
-[AsyncConfig.kt](../src/main/kotlin/com/site/infrastructure/async/AsyncConfig.kt#L16-L33)
+[AsyncConfig.kt](../src/main/kotlin/com/site/infrastructure/async/AsyncConfig.kt#L16-L34)
 
 ```kotlin
     /**
      * 알림 발송 전용 스레드 풀. 외부 API 가 느려져도 다른 비동기 작업까지 막히지 않게 용도별로 나눈다.
+     * 가상 스레드를 켜도 이 풀은 플랫폼 스레드 최대 8개로 둔다. 동시 발송 수를 묶어 외부 API 와 DB 커넥션을 지키는 것이 이 풀의 역할이다.
      *
      * 큐(1000)까지 가득 차면 빠른 발송만 건너뛴다. 알림은 Outbox 에 남아 있어 스케줄러가 나중에 보낸다.
      * 기본 정책(AbortPolicy)이면 예외가 발급 요청 스레드로 터져서, 쿠폰은 발급됐는데 API 는 500 을 응답하게 된다.

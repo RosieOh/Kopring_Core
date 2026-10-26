@@ -371,7 +371,7 @@ object AsyncExecutors {
 
 ### `sealed` — "결과는 이것들뿐"
 
-[CouponQueueStore.kt](../src/main/kotlin/com/site/domain/coupon/queue/port/CouponQueueStore.kt#L69-L81)
+[CouponQueueStore.kt](../src/main/kotlin/com/site/domain/coupon/queue/port/CouponQueueStore.kt#L75-L87)
 
 ```kotlin
 /** 줄 서기 결과. 예전에는 -1, -2 같은 숫자로 돌려줬지만 의미를 타입으로 드러낸다. */
@@ -521,7 +521,7 @@ fun <T, R> Page<T>.toPageResponse(transform: (T) -> R): PageResponse<R> =
 | `run` | `this` | 블록 결과 | 테스트에서 객체 하나로 여러 호출 (`provider().run { ... }`) |
 | `takeIf` | `it` | 조건이 참이면 객체, 아니면 null | 조건부 체인 |
 
-[AsyncConfig.kt](../src/main/kotlin/com/site/infrastructure/async/AsyncConfig.kt#L22-L33)
+[AsyncConfig.kt](../src/main/kotlin/com/site/infrastructure/async/AsyncConfig.kt#L23-L34)
 
 ```kotlin
     @Bean(AsyncExecutors.NOTIFICATION)
@@ -607,7 +607,7 @@ Kotlin 은 **읽기 전용 컬렉션(`List`, `Map`)과 바꿀 수 있는 컬렉�
 
 `try` 도 값을 돌려주는 식입니다.
 
-[CouponIssueService.kt](../src/main/kotlin/com/site/domain/coupon/service/CouponIssueService.kt#L143-L151)
+[CouponIssueService.kt](../src/main/kotlin/com/site/domain/coupon/service/CouponIssueService.kt#L144-L152)
 
 ```kotlin
     private fun saveIssuedCoupon(couponEvent: CouponEvent, memberId: Long): IssuedCoupon {

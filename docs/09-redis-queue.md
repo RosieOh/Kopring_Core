@@ -93,7 +93,7 @@ interface CouponQueueStore {
 
 줄 서기는 확인할 것이 많습니다. 이미 결과가 있나? 처리 중인가? 마감됐나? 이미 줄에 있나? 이것들을 명령 여러 개로 보내면, 사이사이에 워커가 끼어들어 상태가 바뀝니다.
 
-[RedisCouponQueueStore.kt](../src/main/kotlin/com/site/infrastructure/redis/queue/RedisCouponQueueStore.kt#L150-L174)
+[RedisCouponQueueStore.kt](../src/main/kotlin/com/site/infrastructure/redis/queue/RedisCouponQueueStore.kt#L158-L182)
 
 ```kotlin
         // KEYS: waiting, seq, result, closed, processing / ARGV: memberId, ttlSeconds
@@ -134,7 +134,7 @@ interface CouponQueueStore {
 
 ### 꺼내기 — 대기에서 처리 중으로
 
-[RedisCouponQueueStore.kt](../src/main/kotlin/com/site/infrastructure/redis/queue/RedisCouponQueueStore.kt#L176-L192)
+[RedisCouponQueueStore.kt](../src/main/kotlin/com/site/infrastructure/redis/queue/RedisCouponQueueStore.kt#L184-L200)
 
 ```kotlin
         // KEYS: waiting, processing / ARGV: count, leaseUntil, ttlSeconds
@@ -234,7 +234,7 @@ class CouponQueueWorker(
 
 M3 의 워커는 회원마다 트랜잭션을 열었습니다. 커밋(디스크 기록)이 회원 수만큼 일어나서, 1,000장을 나눠 주는 데 12초가 걸렸습니다. M4 에서 50명을 한 트랜잭션으로 묶었습니다.
 
-[CouponIssueService.kt](../src/main/kotlin/com/site/domain/coupon/service/CouponIssueService.kt#L86-L123)
+[CouponIssueService.kt](../src/main/kotlin/com/site/domain/coupon/service/CouponIssueService.kt#L86-L124)
 
 ```kotlin
     /**
@@ -273,6 +273,7 @@ M3 의 워커는 회원마다 트랜잭션을 열었습니다. 커밋(디스크 
                 CouponEventStatus.UPCOMING -> ErrorCode.COUPON_EVENT_NOT_STARTED
                 else -> ErrorCode.COUPON_SOLD_OUT
             },
+            remainingQuantity = couponEvent.remainingQuantity,
         )
     }
 ```
@@ -287,16 +288,17 @@ M3 의 워커는 회원마다 트랜잭션을 열었습니다. 커밋(디스크 
 
 ### 결과 기록과 마감
 
-[CouponQueueWorker.kt](../src/main/kotlin/com/site/domain/coupon/queue/CouponQueueWorker.kt#L72-L86)
+[CouponQueueWorker.kt](../src/main/kotlin/com/site/domain/coupon/queue/CouponQueueWorker.kt#L72-L89)
 
 ```kotlin
     private fun issueBatch(couponEventId: Long, memberIds: List<Long>) {
-        val results = try {
-            couponIssueService.issueQueuedBatch(couponEventId, memberIds).toQueueResults()
+        val batch = try {
+            couponIssueService.issueQueuedBatch(couponEventId, memberIds)
         } catch (e: Exception) {
             log.warn("일괄 발급에 실패해 한 명씩 다시 처리합니다. couponEventId={}, members={}", couponEventId, memberIds.size, e)
-            memberIds.associateWith { issueOne(couponEventId, it) }
+            null
         }
+        val results = batch?.toQueueResults() ?: memberIds.associateWith { issueOne(couponEventId, it) }
 
         results.entries.groupBy({ it.value }, { it.key }).forEach { (result, ids) ->
             couponQueueStore.complete(couponEventId, ids, result)
@@ -304,11 +306,14 @@ M3 의 워커는 회원마다 트랜잭션을 열었습니다. 커밋(디스크 
         }
         // 소진·종료를 만나면 대기열을 닫아 새로 줄 서는 것을 막는다. 남은 대기자는 다음 반복에서 한꺼번에 정리한다
         results.values.firstOrNull { it.closesQueue }?.let { couponQueueStore.close(couponEventId, it) }
+        // 조회 간격 힌트가 "남은 수량만큼 처리되면 결과가 나온다"를 계산할 수 있게 남겨 둔다
+        batch?.let { couponQueueStore.saveRemainingQuantity(couponEventId, it.remainingQuantity) }
     }
 ```
 
 - 일괄 발급이 통째로 실패하면(예: 한 명의 데이터 문제) 한 명씩 원자적 UPDATE 로 다시 시도합니다. 한 사람 때문에 50명이 모두 실패하지 않게 합니다.
 - 소진을 만나면 대기열을 **닫습니다**. 뒤에 선 사람은 DB 에 갈 필요 없이 모두 소진이므로, 다음 반복에서 `drainWaiting` 이 1,000명씩 한꺼번에 결과를 씁니다.
+- 일괄 발급이 성공하면 **남은 수량을 Redis 에 남깁니다**(M5). 아래 6절의 조회 간격 힌트가 "언제 결과가 나올지"를 추정할 때 씁니다.
 
 [CouponQueueResult.kt](../src/main/kotlin/com/site/domain/coupon/queue/CouponQueueResult.kt)
 
@@ -335,7 +340,7 @@ enum class CouponQueueResult(
 
 M4 에서는 서버가 **다음에 언제 물어보라**고 알려 줍니다.
 
-[CouponQueuePollingPolicy.kt](../src/main/kotlin/com/site/domain/coupon/queue/CouponQueuePollingPolicy.kt#L7-L32)
+[CouponQueuePollingPolicy.kt](../src/main/kotlin/com/site/domain/coupon/queue/CouponQueuePollingPolicy.kt#L8-L47)
 
 ```kotlin
 /**
@@ -343,24 +348,38 @@ M4 에서는 서버가 **다음에 언제 물어보라**고 알려 줍니다.
  *
  * 모두가 0.5초마다 물으면, 1,950번째 사용자의 조회는 대부분 "아직 대기 중"이라는 같은 답을 받는다.
  * 남은 예상 대기 시간의 절반 뒤에 다시 묻게 하면, 결과를 늦게 알게 되는 일 없이 조회 수가 순번에 맞게 준다.
+ *
+ * 예상 대기 시간은 "내 결과가 나오기 전까지 처리될 인원 ÷ 처리량"이다.
+ * 남은 수량보다 뒤에 선 사람은 내 앞사람이 다 처리될 때가 아니라 소진되는 순간 결과(소진)를 받으므로, 처리될 인원은 min(순번, 남은 수량)이다.
+ * 순번만 보면 쿠폰 100장에 2,000번째 사용자에게 2초 뒤에 물으라고 하는데, 실제 결과는 100명이 처리되자마자 나온다.
  */
 @Component
 class CouponQueuePollingPolicy(
     private val properties: CouponQueuePollingProperties,
     private val queueProperties: CouponQueueProperties,
+    private val couponQueueStore: CouponQueueStore,
 ) {
 
     /** 다시 물어볼 때까지 기다릴 시간(ms). 결과가 나왔거나 대기열에 없으면 null — 더 물을 필요가 없다 */
-    fun retryAfterMillis(status: CouponQueueStatus): Long? =
+    fun retryAfterMillis(couponEventId: Long, status: CouponQueueStatus): Long? {
+        // 남은 수량은 기다리는 사람에게만 필요하다 (Redis 조회를 아낀다)
+        val remainingQuantity = if (status is CouponQueueStatus.Waiting) couponQueueStore.remainingQuantity(couponEventId) else null
+        return retryAfterMillis(status, remainingQuantity)
+    }
+
+    /** @param remainingQuantity 워커가 마지막으로 확인한 남은 수량. 모르면 null (순번만으로 추정) */
+    fun retryAfterMillis(status: CouponQueueStatus, remainingQuantity: Int?): Long? =
         when (status) {
             CouponQueueStatus.Processing -> properties.minInterval.toMillis()
-            is CouponQueueStatus.Waiting ->
-                if (status.position <= queueProperties.batchSize) {
-                    properties.minInterval.toMillis() // 다음 배치에 들어가는 순번
+            is CouponQueueStatus.Waiting -> {
+                val processedBeforeMyResult = remainingQuantity?.let { minOf(status.position, it.toLong()) } ?: status.position
+                if (processedBeforeMyResult <= queueProperties.batchSize) {
+                    properties.minInterval.toMillis() // 다음 배치 안에 결과가 나온다
                 } else {
-                    val expectedWaitMillis = status.position * 1_000 / properties.estimatedThroughputPerSecond
+                    val expectedWaitMillis = processedBeforeMyResult * 1_000 / properties.estimatedThroughputPerSecond
                     (expectedWaitMillis / 2).coerceIn(properties.minInterval.toMillis(), properties.maxInterval.toMillis())
                 }
+            }
             is CouponQueueStatus.Done, CouponQueueStatus.NotInQueue -> null
         }
 }
@@ -368,7 +387,17 @@ class CouponQueuePollingPolicy(
 
 순번 1,000번이면: 예상 대기 = 1,000 ÷ 초당 500명 = 2초 → 그 절반인 1초 뒤에 다시 묻게 합니다. 0.3초~3초 사이로 제한합니다(`coerceIn`).
 
-**알려진 한계**: 이 힌트는 남은 쿠폰 수를 모릅니다. 100장짜리에 2,000명이 줄 서면, 2,000번째 사용자는 "2초 뒤에 물어보라"는 힌트를 받습니다. 실제로는 100장이 금방 소진되고 나머지는 곧바로 정리되는데, 다음 조회 때까지 그 결과를 모릅니다. 그래서 100장 · 2,000명에서는 결과까지 p95 가 M3 보다 늘었습니다(1.87s → 2.38s). 힌트를 `min(순번, 남은 수량)` 으로 계산하는 것이 [load-test/README.md](../load-test/README.md) 에 적힌 다음 개선입니다.
+**남은 수량을 보는 이유 (M5)**: 처음(M4)에는 순번만 봤습니다. 100장짜리에 2,000명이 줄 서면 2,000번째 사용자는 "2초 뒤에 물어보라"는 힌트를 받았는데, 실제로는 100장이 금방 소진되고 나머지는 곧바로 "소진"으로 정리됩니다. 결과는 이미 나왔는데 다음 조회 때까지 모르는 것입니다. 그래서 100장 · 2,000명에서는 결과까지 p95 가 M3 보다 늘었습니다(1.87s → 2.38s).
+
+남은 수량보다 뒤에 선 사람은 "앞사람이 다 처리될 때"가 아니라 **"소진되는 순간"** 결과를 받습니다. 그때까지 처리되는 인원은 남은 수량만큼이므로, 예상 대기를 `min(순번, 남은 수량) ÷ 처리량` 으로 계산합니다.
+
+| 순번 · 남은 수량 | 순번만 볼 때 | 남은 수량도 볼 때 |
+|---|---|---|
+| 2,000번 · 50장 | 2초 | 0.3초 (다음 배치에 소진) |
+| 2,000번 · 1,000장 | 2초 | 1초 |
+| 1,000번 · 5,000장 | 1초 | 1초 (순번이 더 앞) |
+
+남은 수량은 워커가 일괄 발급할 때마다 Redis 에 남깁니다(위 `issueBatch` 의 `saveRemainingQuantity`). DB 를 읽지 않고, 기다리는 사람에게만 읽습니다.
 
 ### SSE — 서버가 밀어 주기
 

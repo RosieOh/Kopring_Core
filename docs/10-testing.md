@@ -184,7 +184,7 @@ class MemberServiceTest : BehaviorSpec({
 
 `findByIdOrNull` 은 Spring Data 의 확장 함수입니다. 확장 함수는 사실 정적 함수라 `every { repo.findByIdOrNull(1L) }` 로 잡기 어렵습니다. 대신 그 안에서 부르는 `findById` 를 모킹합니다.
 
-[StartedCouponEventCacheTest.kt](../src/test/kotlin/com/site/domain/coupon/service/StartedCouponEventCacheTest.kt#L20-L47)
+[StartedCouponEventCacheTest.kt](../src/test/kotlin/com/site/domain/coupon/service/StartedCouponEventCacheTest.kt#L22-L49)
 
 ```kotlin
 class StartedCouponEventCacheTest : FunSpec({
@@ -320,7 +320,7 @@ coupon.queue.scheduler.enabled=false
 
 스레드 300개를 그냥 띄우면 앞의 스레드가 끝난 뒤에 뒤의 스레드가 시작해서 겹치지 않을 수 있습니다. **모두 출발선에 세웠다가 동시에 출발**시킵니다.
 
-[CouponIssueConcurrencyTest.kt](../src/test/kotlin/com/site/domain/coupon/service/CouponIssueConcurrencyTest.kt#L148-L187)
+[CouponIssueConcurrencyTest.kt](../src/test/kotlin/com/site/domain/coupon/service/CouponIssueConcurrencyTest.kt#L237-L276)
 
 ```kotlin
     /**

@@ -139,15 +139,20 @@ class CouponQueueMetrics(
 # 지표: 모든 지표에 애플리케이션 이름 태그를 붙이고, HTTP 응답 시간은 히스토그램으로 내보내 Prometheus 에서 p95 를 계산한다
 management.metrics.tags.application=kopring-core
 management.metrics.distribution.percentiles-histogram.http.server.requests=true
-# Tomcat 스레드 지표 (부하 테스트 때 요청 스레드가 얼마나 바쁜지 본다)
-server.tomcat.mbeanregistry.enabled=true
+# Tomcat MBean 등록은 끈다 (기본값). 켜면 연결마다 MBean 을 등록·해제하는데, 그 코드가 synchronized 안에서 JMX 서버를 기다려
+# 가상 스레드가 운영체제 스레드에 고정(pinning)된다. 가상 스레드에서는 Tomcat 스레드 풀 지표도 의미가 없어서,
+# 요청이 얼마나 몰렸는지는 처리 중인 요청 수(http_server_requests_active_seconds_gcount)로 본다.
 ```
 
 | 지표 | 무엇을 보나 |
 |---|---|
 | `http_server_requests_seconds` | API 별 응답 시간 |
 | `hikaricp_connections_pending` | DB 커넥션을 기다리는 요청 수 |
-| `tomcat_threads_busy_threads` | 바쁜 요청 스레드 수 (최대 200) |
+| `http_server_requests_active_seconds_gcount` | 지금 처리 중인 요청 수 |
+
+M4 까지는 Tomcat 스레드 지표(`tomcat_threads_busy_threads`, 최대 200)를 봤습니다. 이 지표를 내려면 `server.tomcat.mbeanregistry.enabled=true` 가 필요한데, M5 에서 가상 스레드를 켜자 바로 이 설정이 **앱 전체를 멈추게** 했습니다. 그 이야기는 [13장](13-virtual-threads-and-backpressure.md)에 있습니다.
+
+`_gcount` 라는 이름이 붙는 이유: 위의 히스토그램 설정이 접두어(`http.server.requests`)로 `http.server.requests.active` 에도 걸려서, 처리 중인 요청을 세는 LongTaskTimer 가 "게이지 히스토그램"으로 나갑니다. 그 개수가 `_gcount` 입니다. 지표 이름은 추측하지 말고 `/actuator/prometheus` 출력에서 확인하세요.
 
 지표는 `/actuator/prometheus` 로 나갑니다. 로컬에서만 노출하고, 운영 프로필은 health 만 엽니다. ([SecurityConfig](../src/main/kotlin/com/site/infrastructure/security/SecurityConfig.kt) 주석)
 

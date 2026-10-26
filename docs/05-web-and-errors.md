@@ -57,7 +57,7 @@ class CouponController(
         @AuthenticationPrincipal authMember: AuthMember,
     ): ResponseEntity<SuccessResponse<CouponQueueStatusResponse>> {
         val status = couponQueueService.enqueue(couponEventId, authMember.memberId)
-        return SuccessCode.ENTER_COUPON_QUEUE_SUCCESS.toResponseEntity(status.toResponse(pollingPolicy.retryAfterMillis(status)))
+        return SuccessCode.ENTER_COUPON_QUEUE_SUCCESS.toResponseEntity(status.toResponse(pollingPolicy.retryAfterMillis(couponEventId, status)))
     }
 ```
 

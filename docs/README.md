@@ -23,7 +23,7 @@
 
 - 코드 블록 위에 링크가 붙어 있으면 **저장소 코드를 그대로 옮긴 것**입니다.
 - 저장소에 없는 코드는 `// 예시` 라고 표시했습니다.
-- 인용은 M4 릴리스(`main` 의 `fc0b982`) 기준입니다. 코드가 바뀌면 링크 쪽이 최신입니다.
+- 인용은 M5(몰림 대응) 작업이 끝난 코드 기준입니다. 코드가 바뀌면 링크 쪽이 최신입니다.
 
 ## 목차
 
@@ -41,6 +41,7 @@
 | 10 | [테스트](10-testing.md) | 시간·동시성·외부 API 가 얽힌 코드를 어떻게 검증하나? | Kotest, MockK, Testcontainers |
 | 11 | [관측과 부하 테스트](11-observability-and-load-test.md) | "빨라졌다"를 숫자로 말하려면? | Micrometer, Prometheus, k6 |
 | 12 | [다음 공부와 연습 문제](12-next-steps-and-exercises.md) | 여기서 어디로 가나? (연습 문제 힌트 포함) | — |
+| 13 | [심화: 가상 스레드와 몰림 대응](13-virtual-threads-and-backpressure.md) | 스레드 제한을 풀면 빨라질까? 무엇이 대신 무너지나? | `CouponIssueBulkhead`, `SchedulingConfig`, `StartedCouponEventCache` |
 
 **읽는 순서 추천**
 
