@@ -1,14 +1,24 @@
 package com.site.domain.coupon.repository
 
 import com.site.domain.coupon.entity.CouponEvent
+import jakarta.persistence.LockModeType
 import org.springframework.data.domain.Page
 import org.springframework.data.domain.Pageable
 import org.springframework.data.jpa.repository.JpaRepository
+import org.springframework.data.jpa.repository.Lock
 import org.springframework.data.jpa.repository.Modifying
 import org.springframework.data.jpa.repository.Query
 import java.time.LocalDateTime
 
 interface CouponEventRepository : JpaRepository<CouponEvent, Long> {
+
+    /**
+     * SELECT ... FOR UPDATE — 트랜잭션이 끝날 때까지 다른 트랜잭션은 이 행을 잠그거나 수정할 수 없다.
+     * 대기열 일괄 발급에서 "남은 수량 확인 → 여러 장 발급" 사이에 다른 워커가 끼어들지 못하게 한다.
+     */
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select e from CouponEvent e where e.id = :id")
+    fun findByIdForUpdate(id: Long): CouponEvent?
 
     /** 아직 끝나지 않은(진행 중 + 시작 전) 이벤트 */
     @Query("select e from CouponEvent e where e.period.endAt > :now")

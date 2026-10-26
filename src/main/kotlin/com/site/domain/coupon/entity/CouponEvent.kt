@@ -137,13 +137,17 @@ class CouponEvent(
     }
 
     /**
-     * 메모리에서 issuedQuantity 를 1 올린다. (커밋 시점에 dirty checking 으로 UPDATE)
+     * 메모리에서 issuedQuantity 를 quantity 만큼 올린다. (커밋 시점에 dirty checking 으로 UPDATE)
      * "읽고 → 판단하고 → 쓰는" 구조라서, 동시에 여러 요청이 같은 값을 읽으면 Lost Update 가 생긴다.
      * 이 메서드를 안전하게 쓰려면 호출하는 쪽에서 락으로 감싸야 한다. (CouponIssueService 참고)
      */
-    fun issue(now: LocalDateTime) {
+    fun issue(now: LocalDateTime, quantity: Int = 1) {
+        require(quantity > 0) { "quantity must be positive: $quantity" }
         checkIssuable(now)
-        issuedQuantity++
+        if (remainingQuantity < quantity) {
+            throw ServiceException(ErrorCode.COUPON_SOLD_OUT)
+        }
+        issuedQuantity += quantity
     }
 
     /** 시작된 이벤트는 이미 쿠폰을 받은 사람이 있을 수 있으므로 수정·삭제를 막는다. */
