@@ -1,3 +1,4 @@
-results/*.json
-results/runs.txt
-results/summary.md
+# 실행할 때마다 새로 생기는 원본 결과 (정리한 표는 results/*.md 로 커밋한다)
+results/**/*.json
+results/**/runs.txt
+results/**/summary.md
