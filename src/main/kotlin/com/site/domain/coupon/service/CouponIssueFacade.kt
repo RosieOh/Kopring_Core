@@ -1,6 +1,7 @@
 package com.site.domain.coupon.service
 
 import com.site.domain.coupon.entity.IssuedCoupon
+import com.site.independent.error.exception.ServiceException
 import org.springframework.stereotype.Service
 
 /**
@@ -17,10 +18,16 @@ import org.springframework.stereotype.Service
 @Service
 class CouponIssueFacade(
     private val couponIssueService: CouponIssueService,
+    private val metrics: CouponIssueMetrics,
 ) {
 
-    fun issue(couponEventId: Long, memberId: Long): IssuedCoupon {
-        couponIssueService.precheck(couponEventId, memberId)
-        return couponIssueService.issueWithDistributedLock(couponEventId, memberId)
-    }
+    fun issue(couponEventId: Long, memberId: Long): IssuedCoupon =
+        try {
+            couponIssueService.precheck(couponEventId, memberId)
+            couponIssueService.issueWithDistributedLock(couponEventId, memberId)
+                .also { metrics.recordDirectIssued() }
+        } catch (e: ServiceException) {
+            metrics.recordDirectFailed(e.errorCode)
+            throw e
+        }
 }

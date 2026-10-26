@@ -4,6 +4,8 @@ import com.site.independent.error.exception.ServiceException
 import com.site.independent.lock.DistributedLock
 import com.site.independent.parser.CustomSpringELParser
 import com.site.independent.type.ErrorCode
+import io.micrometer.core.instrument.MeterRegistry
+import io.micrometer.core.instrument.Timer
 import org.aspectj.lang.ProceedingJoinPoint
 import org.aspectj.lang.annotation.Around
 import org.aspectj.lang.annotation.Aspect
@@ -12,6 +14,7 @@ import org.redisson.api.RedissonClient
 import org.springframework.core.Ordered
 import org.springframework.core.annotation.Order
 import org.springframework.stereotype.Component
+import java.util.concurrent.TimeUnit
 
 /**
  * @DistributedLock 이 붙은 메서드를 Redisson 락으로 감싼다.
@@ -28,6 +31,7 @@ import org.springframework.stereotype.Component
 class DistributedLockAspect(
     private val redissonClient: RedissonClient,
     private val newTransactionRunner: NewTransactionRunner,
+    private val meterRegistry: MeterRegistry,
 ) {
 
     @Around("@annotation(distributedLock)")
@@ -35,12 +39,14 @@ class DistributedLockAspect(
         val lockName = LOCK_PREFIX + resolveKey(joinPoint, distributedLock.key)
         val lock = redissonClient.getLock(lockName)
 
+        val waitStartedAt = System.nanoTime()
         val acquired = try {
             lock.tryLock(distributedLock.waitTime, distributedLock.leaseTime, distributedLock.timeUnit)
         } catch (e: InterruptedException) {
             Thread.currentThread().interrupt()
             throw ServiceException(ErrorCode.LOCK_ACQUISITION_FAILED)
         }
+        recordWait(distributedLock.key, acquired, System.nanoTime() - waitStartedAt)
         if (!acquired) {
             throw ServiceException(ErrorCode.LOCK_ACQUISITION_FAILED)
         }
@@ -53,6 +59,24 @@ class DistributedLockAspect(
                 lock.unlock()
             }
         }
+    }
+
+    /**
+     * 락을 얻기까지 기다린 시간. Prometheus 에서는 lock_wait_seconds_bucket{lock, result} 로 보인다.
+     * 태그에는 락 이름 전체(이벤트 ID 포함)가 아니라 종류만 넣는다. ('coupon-event:' + #id → coupon-event)
+     */
+    private fun recordWait(
+        key: String,
+        acquired: Boolean,
+        nanos: Long,
+    ) {
+        Timer.builder("lock.wait")
+            .description("분산락을 얻기까지 기다린 시간")
+            .tag("lock", key.substringAfter("'").substringBefore(":"))
+            .tag("result", if (acquired) "acquired" else "timeout")
+            .publishPercentileHistogram()
+            .register(meterRegistry)
+            .record(nanos, TimeUnit.NANOSECONDS)
     }
 
     // "'coupon-event:' + #couponEventId" 같은 SpEL 을 실제 파라미터 값으로 평가한다

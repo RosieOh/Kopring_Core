@@ -55,6 +55,10 @@ interface CouponQueueStore {
 
     fun isProcessing(couponEventId: Long, memberId: Long): Boolean
 
+    fun waitingCount(couponEventId: Long): Long
+
+    fun processingCount(couponEventId: Long): Long
+
     fun findResult(couponEventId: Long, memberId: Long): CouponQueueResult?
 
     fun close(couponEventId: Long, reason: CouponQueueResult)
