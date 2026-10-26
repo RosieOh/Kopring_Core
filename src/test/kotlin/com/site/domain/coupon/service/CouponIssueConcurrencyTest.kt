@@ -160,6 +160,43 @@ class CouponIssueConcurrencyTest @Autowired constructor(
     }
 
     @Test
+    fun `자리를 기다리는 사이에 소진되면, 자리를 얻은 뒤 DB 를 거치지 않고 바로 소진으로 거절된다`() {
+        val couponEventId = couponEventRepository.save(couponEventFixture(totalQuantity = 10)).id
+        val bulkhead = CouponIssueBulkhead(CouponIssueProperties(bulkhead = CouponIssueProperties.Bulkhead(maxConcurrent = 1)), meterRegistry)
+        val facade = CouponIssueFacade(
+            startedCouponEvents,
+            couponIssueService,
+            bulkhead,
+            CouponIssueProperties(directStrategy = DirectIssueStrategy.ATOMIC_UPDATE),
+            metrics,
+        )
+        // 하나뿐인 자리를 다른 요청이 쥐고 있다
+        val occupied = CountDownLatch(1)
+        val release = CountDownLatch(1)
+        val holder = CompletableFuture.runAsync {
+            bulkhead.execute {
+                occupied.countDown()
+                release.await()
+            }
+        }
+        occupied.await(5, TimeUnit.SECONDS)
+
+        // 사전 검사를 통과하고 자리를 기다린다
+        var result: Result<IssuedCoupon>? = null
+        val waiter = Thread { result = runCatching { facade.issue(couponEventId, memberId = 1L) } }.apply { start() }
+        await atMost Duration.ofSeconds(5) untilAsserted { assertEquals(Thread.State.TIMED_WAITING, waiter.state) }
+
+        // 기다리는 사이에 이 서버가 소진을 확인했다. (DB 에는 아직 쿠폰이 남아 있어서, DB 로 가면 발급된다)
+        startedCouponEvents.markSoldOut(couponEventId)
+        release.countDown()
+        holder.get(5, TimeUnit.SECONDS)
+        waiter.join(5_000)
+
+        assertEquals(ErrorCode.COUPON_SOLD_OUT, (result?.exceptionOrNull() as? ServiceException)?.errorCode)
+        assertEquals(0L, issuedCouponRepository.countByCouponEventId(couponEventId))
+    }
+
+    @Test
     fun `같은 회원이 동시에 여러 번 요청하면 unique 제약으로 1장만 발급되고, 실패한 요청의 수량 증가는 롤백된다`() {
         val result = issueConcurrently(
             label = "같은 회원 중복 요청",
