@@ -21,9 +21,13 @@ def server_metrics(start: int, end: int) -> dict:
     at = end + 3
     return {
         "db_pending_max": prom(f"max_over_time(sum(hikaricp_connections_pending{{{APP}}})[{window}s:1s])", at),
-        "tomcat_busy_max": prom(f"max_over_time(sum(tomcat_threads_busy_threads{{{APP}}})[{window}s:1s])", at),
+        # 가상 스레드에는 Tomcat 스레드 풀 지표가 없어서, 스레드 방식과 상관없는 "처리 중인 요청 수"로 본다
+        "inflight_max": prom(f"max_over_time(sum(http_server_requests_active_seconds_gcount{{{APP}}})[{window}s:1s])", at),
         "lock_wait_p95": prom(
             f"histogram_quantile(0.95, sum by (le) (increase(lock_wait_seconds_bucket{{{APP}}}[{window}s])))", at
+        ),
+        "bulkhead_wait_p95": prom(
+            f"histogram_quantile(0.95, sum by (le) (increase(coupon_issue_bulkhead_wait_seconds_bucket{{{APP}}}[{window}s])))", at
         ),
         "queue_waiting_max": prom(f'max_over_time(sum(coupon_queue_size{{{APP}, state="waiting"}})[{window}s:1s])', at),
     }
@@ -59,11 +63,14 @@ def main(out_dir: str, quantity: str, label: str) -> None:
         if scenario == "direct":
             direct_rows.append(
                 f"| {vus} | {count(summary, 'result_issued')} | {count(summary, 'result_sold_out')} "
-                f"| {count(summary, 'result_lock_timeout')} | {count(summary, 'result_other')} "
+                f"| {count(summary, 'result_lock_timeout') + count(summary, 'result_busy')} | {count(summary, 'result_other')} "
                 f"| {ms(metric(summary, 'http_req_duration{name:issue}', 'med'))} "
                 f"| {ms(metric(summary, 'http_req_duration{name:issue}', 'p(95)'))} "
                 f"| {ms(metric(summary, 'http_req_duration{name:issue}', 'max'))} "
-                f"| {num(server['lock_wait_p95'], '{:.2f}s')} | {num(server['db_pending_max'])} | {num(server['tomcat_busy_max'])} |"
+                f"| {ms(metric(summary, 'http_req_duration{name:browse}', 'p(95)'))} "
+                f"| {ms(metric(summary, 'http_req_duration{name:browse}', 'max'))} "
+                f"| {num(server['lock_wait_p95'], '{:.2f}s')} | {num(server['bulkhead_wait_p95'], '{:.2f}s')} "
+                f"| {num(server['db_pending_max'])} | {num(server['inflight_max'])} |"
             )
         else:
             queue_rows.append(
@@ -72,18 +79,21 @@ def main(out_dir: str, quantity: str, label: str) -> None:
                 f"| {ms(metric(summary, 'http_req_duration{name:enqueue}', 'p(95)'))} "
                 f"| {ms(metric(summary, 'time_to_result', 'med'))} | {ms(metric(summary, 'time_to_result', 'p(95)'))} "
                 f"| {ms(metric(summary, 'time_to_result', 'max'))} | {requests} "
-                f"| {num(server['queue_waiting_max'])} | {num(server['db_pending_max'])} | {num(server['tomcat_busy_max'])} |"
+                f"| {num(server['queue_waiting_max'])} | {num(server['db_pending_max'])} | {num(server['inflight_max'])} |"
             )
 
     suffix = f" ({label})" if label else ""
     if direct_rows:
         print(f"### 즉시 발급{suffix} — 쿠폰 {quantity}장\n")
-        print("| 동시 사용자 | 발급 | 소진 | 락 타임아웃 | 기타 실패 | 응답 중앙값 | 응답 p95 | 응답 최대 | 락 대기 p95 | DB 커넥션 대기 최대 | Tomcat 스레드 최대 |")
-        print("|---|---|---|---|---|---|---|---|---|---|---|")
+        print(
+            "| 동시 사용자 | 발급 | 소진 | 503 (락·자리) | 기타 실패 | 응답 중앙값 | 응답 p95 | 응답 최대 "
+            "| 다른 API p95 | 다른 API 최대 | 락 대기 p95 | 자리 대기 p95 | DB 커넥션 대기 최대 | 처리 중 요청 최대 |"
+        )
+        print("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|")
         print("\n".join(direct_rows) + "\n")
     if queue_rows:
         print(f"### 대기열{suffix} — 쿠폰 {quantity}장\n")
-        print("| 동시 사용자 | 발급 | 소진 | 실패·시간 초과 | 등록 응답 p95 | 결과까지 중앙값 | 결과까지 p95 | 결과까지 최대 | 총 HTTP 요청 | 대기열 최대 | DB 커넥션 대기 최대 | Tomcat 스레드 최대 |")
+        print("| 동시 사용자 | 발급 | 소진 | 실패·시간 초과 | 등록 응답 p95 | 결과까지 중앙값 | 결과까지 p95 | 결과까지 최대 | 총 HTTP 요청 | 대기열 최대 | DB 커넥션 대기 최대 | 처리 중 요청 최대 |")
         print("|---|---|---|---|---|---|---|---|---|---|---|---|")
         print("\n".join(queue_rows) + "\n")
 

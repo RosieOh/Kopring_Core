@@ -364,8 +364,8 @@
     {
       "id": 8,
       "type": "timeseries",
-      "title": "Tomcat 요청 스레드",
-      "description": "",
+      "title": "처리 중인 HTTP 요청",
+      "description": "가상 스레드에서는 Tomcat 스레드 풀이 없어서, 스레드 대신 동시에 처리 중인 요청 수를 본다",
       "datasource": {
         "type": "prometheus",
         "uid": "prometheus"
@@ -403,17 +403,8 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(tomcat_threads_busy_threads{application=\"kopring-core\"})",
-          "legendFormat": "바쁜 스레드"
-        },
-        {
-          "refId": "B",
-          "datasource": {
-            "type": "prometheus",
-            "uid": "prometheus"
-          },
-          "expr": "sum(tomcat_threads_config_max_threads{application=\"kopring-core\"})",
-          "legendFormat": "최대"
+          "expr": "sum(http_server_requests_active_seconds_gcount{application=\"kopring-core\"})",
+          "legendFormat": "처리 중"
         }
       ]
     },

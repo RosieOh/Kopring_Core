@@ -7,6 +7,7 @@ import com.site.independent.config.ClockConfig
 import com.site.independent.error.exception.ServiceException
 import com.site.independent.type.ErrorCode
 import com.site.support.couponEventFixture
+import com.site.support.runConcurrently
 import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
@@ -16,6 +17,7 @@ import io.mockk.verify
 import java.time.Clock
 import java.time.LocalDateTime
 import java.util.Optional
+import java.util.concurrent.ConcurrentLinkedQueue
 
 class StartedCouponEventCacheTest : FunSpec({
 
@@ -90,6 +92,33 @@ class StartedCouponEventCacheTest : FunSpec({
 
         errorCodeOf() shouldBe ErrorCode.COUPON_EVENT_ENDED
         errorCodeOf() shouldBe ErrorCode.COUPON_EVENT_ENDED
+        verify(exactly = 2) { couponEventRepository.findById(1L) }
+    }
+
+    test("캐시가 빈 채로 같은 이벤트에 요청이 몰려도 DB 는 한 번만 읽는다 (single-flight)") {
+        every { couponEventRepository.findById(1L) } answers {
+            Thread.sleep(500) // 읽는 동안 나머지 요청이 모두 도착한다
+            Optional.of(event())
+        }
+
+        runConcurrently(taskCount = 50) { cache.checkIssuable(1L, CouponIssueMode.DIRECT) }
+
+        verify(exactly = 1) { couponEventRepository.findById(1L) }
+    }
+
+    test("함께 기다린 요청들은 먼저 읽은 요청의 실패를 같이 받고, 다음 요청은 다시 읽는다") {
+        every { couponEventRepository.findById(1L) } answers {
+            Thread.sleep(500)
+            Optional.empty()
+        }
+        val errors = ConcurrentLinkedQueue<ErrorCode>()
+
+        runConcurrently(taskCount = 10) {
+            errors += shouldThrow<ServiceException> { cache.checkIssuable(1L, CouponIssueMode.DIRECT) }.errorCode
+        }
+        errorCodeOf() shouldBe ErrorCode.COUPON_EVENT_NOT_FOUND
+
+        errors.toSet() shouldBe setOf(ErrorCode.COUPON_EVENT_NOT_FOUND)
         verify(exactly = 2) { couponEventRepository.findById(1L) }
     }
 
