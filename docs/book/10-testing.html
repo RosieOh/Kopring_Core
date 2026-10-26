@@ -1,0 +1,631 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>10장. 테스트 — 코프링 교재</title>
+<meta name="description" content="선착순 쿠폰 코드로 배우는 Kotlin + Spring Boot">
+<script>try{var t=localStorage.getItem("book-theme");if(t)document.documentElement.dataset.theme=t;}catch(e){}</script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+<link rel="stylesheet" href="assets/book.css">
+<link rel="stylesheet" href="assets/highlight.css">
+<script src="assets/book.js" defer></script>
+</head>
+<body>
+<a class="skip-link" href="#content">본문으로 건너뛰기</a>
+<header class="topbar">
+  <button type="button" class="menu-button" aria-label="장 목록 열기" aria-expanded="false" aria-controls="sidebar">목차</button>
+  <a class="topbar-title" href="index.html">코프링 교재</a>
+  <button type="button" class="theme-button" aria-label="밝은 화면과 어두운 화면 바꾸기">화면</button>
+</header>
+<div class="layout">
+<aside class="sidebar" id="sidebar">
+  <a class="sidebar-title" href="index.html">코프링 교재<small>선착순 쿠폰으로 배우는 Kotlin + Spring Boot</small></a>
+  <nav aria-label="장 목록"><ol class="chapter-list">
+<li><a href="index.html">처음에 — 읽는 법과 목차</a></li>
+<li><a href="01-kotlin-basics.html">1장. Kotlin 기초</a></li>
+<li><a href="02-spring-meets-kotlin.html">2장. 스프링이 Kotlin 을 만나면</a></li>
+<li><a href="03-architecture.html">3장. 프로젝트 구조와 계층</a></li>
+<li><a href="04-jpa-with-kotlin.html">4장. JPA 엔티티를 Kotlin 으로</a></li>
+<li><a href="05-web-and-errors.html">5장. 웹 계층과 예외 처리</a></li>
+<li><a href="06-auth.html">6장. 인증</a></li>
+<li><a href="07-concurrency.html">7장. 동시성 제어</a></li>
+<li><a href="08-async-and-reliability.html">8장. 비동기와 신뢰성</a></li>
+<li><a href="09-redis-queue.html">9장. Redis 대기열</a></li>
+<li><a href="10-testing.html" aria-current="page">10장. 테스트</a></li>
+<li><a href="11-observability-and-load-test.html">11장. 관측과 부하 테스트</a></li>
+<li><a href="12-next-steps-and-exercises.html">12장. 다음 공부와 연습 문제</a></li>
+<li><a href="13-virtual-threads-and-backpressure.html">13장. 심화: 가상 스레드와 몰림 대응</a></li>
+  </ol></nav>
+</aside>
+<main id="content" class="content">
+<article class="markdown">
+<h1 id="10장-테스트--시간동시성외부-api-를-통제하기">10장. 테스트 — 시간·동시성·외부 API 를 통제하기 <a class="header-anchor" href="#10장-테스트--시간동시성외부-api-를-통제하기">#</a></h1>
+<p><strong>한 줄 요약</strong>: 규칙은 스프링 없이 빠르게(Kotest + MockK), 협력은 운영과 같은 MySQL·Redis 로(Testcontainers) 확인합니다. 시간은 <code>Clock</code> 으로, 동시성은 &quot;한 번에 출발&quot;로, 외부 API 는 가짜 구현으로 통제합니다.</p>
+<h2 id="1-두-종류의-테스트">1. 두 종류의 테스트 <a class="header-anchor" href="#1-두-종류의-테스트">#</a></h2>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th></th>
+<th>단위 테스트</th>
+<th>통합 테스트</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>무엇을</td>
+<td>엔티티 규칙, 서비스의 분기, 정책 계산</td>
+<td>API → DB·Redis 까지, 동시성, 트랜잭션</td>
+</tr>
+<tr>
+<td>스프링</td>
+<td>띄우지 않는다</td>
+<td><code>@SpringBootTest</code></td>
+</tr>
+<tr>
+<td>의존성</td>
+<td>MockK 로 가짜</td>
+<td>Testcontainers 로 진짜 MySQL·Redis</td>
+</tr>
+<tr>
+<td>스타일</td>
+<td>Kotest (<code>BehaviorSpec</code>, <code>FunSpec</code>)</td>
+<td>JUnit 5 (<code>@Test</code>)</td>
+</tr>
+<tr>
+<td>속도</td>
+<td>밀리초</td>
+<td>컨텍스트 기동 수 초 (한 번만)</td>
+</tr>
+<tr>
+<td>예</td>
+<td><a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/test/kotlin/com/site/domain/coupon/entity/CouponEventTest.kt" target="_blank" rel="noopener">CouponEventTest</a>, <a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/test/kotlin/com/site/domain/coupon/service/StartedCouponEventCacheTest.kt" target="_blank" rel="noopener">StartedCouponEventCacheTest</a></td>
+<td><a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/test/kotlin/com/site/domain/coupon/service/CouponIssueConcurrencyTest.kt" target="_blank" rel="noopener">CouponIssueConcurrencyTest</a>, <a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/test/kotlin/com/site/presentation/CouponQueueApiTest.kt" target="_blank" rel="noopener">CouponQueueApiTest</a></td>
+</tr>
+</tbody>
+</table></div>
+<figure class="code-block"><figcaption><span class="code-lang">Shell</span><button type="button" class="copy-button" aria-label="코드 복사">복사</button></figcaption><div class="highlight"><pre><span></span><code>./gradlew<span class="w"> </span><span class="nb">test</span><span class="w">                                          </span><span class="c1"># 전부</span>
+./gradlew<span class="w"> </span><span class="nb">test</span><span class="w"> </span>--tests<span class="w"> </span><span class="s1">'*CouponEventTest*'</span><span class="w">              </span><span class="c1"># 하나만</span>
+./gradlew<span class="w"> </span><span class="nb">test</span><span class="w"> </span>--tests<span class="w"> </span><span class="s1">'*CouponIssueConcurrencyTest*'</span><span class="w">   </span><span class="c1"># 동시성 비교 (로그에 "동시 발급 결과")</span>
+</code></pre></div>
+</figure>
+<h2 id="2-kotest--테스트를-문장처럼">2. Kotest — 테스트를 문장처럼 <a class="header-anchor" href="#2-kotest--테스트를-문장처럼">#</a></h2>
+<h3 id="behaviorspec--given--when--then">BehaviorSpec — Given / When / Then <a class="header-anchor" href="#behaviorspec--given--when--then">#</a></h3>
+<p><a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/test/kotlin/com/site/domain/coupon/entity/CouponEventTest.kt#L11-L42" target="_blank" rel="noopener">CouponEventTest.kt</a></p>
+<figure class="code-block"><figcaption><span class="code-lang">Kotlin</span><button type="button" class="copy-button" aria-label="코드 복사">복사</button></figcaption><div class="highlight"><pre><span></span><code><span class="cm">/**</span>
+<span class="cm"> * BehaviorSpec: Given(상황) / When(행동) / Then(결과) 로 비즈니스 규칙을 문장처럼 적는다.</span>
+<span class="cm"> * 엔티티가 시각을 인자로 받기 때문에 스프링 없이 원하는 시각을 넣어 검증할 수 있다.</span>
+<span class="cm"> */</span>
+<span class="kd">class</span><span class="w"> </span><span class="nc">CouponEventTest</span><span class="w"> </span><span class="p">:</span><span class="w"> </span><span class="n">BehaviorSpec</span><span class="p">({</span>
+
+<span class="w">    </span><span class="kd">val</span><span class="w"> </span><span class="nv">startAt</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">LocalDateTime</span><span class="p">.</span><span class="na">of</span><span class="p">(</span><span class="m">2026</span><span class="p">,</span><span class="w"> </span><span class="m">11</span><span class="p">,</span><span class="w"> </span><span class="m">1</span><span class="p">,</span><span class="w"> </span><span class="m">10</span><span class="p">,</span><span class="w"> </span><span class="m">0</span><span class="p">)</span>
+<span class="w">    </span><span class="kd">val</span><span class="w"> </span><span class="nv">endAt</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">startAt</span><span class="p">.</span><span class="na">plusDays</span><span class="p">(</span><span class="m">7</span><span class="p">)</span>
+
+<span class="w">    </span><span class="kd">fun</span><span class="w"> </span><span class="nf">couponEvent</span><span class="p">(</span><span class="n">totalQuantity</span><span class="p">:</span><span class="w"> </span><span class="kt">Int</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="m">100</span><span class="p">,</span><span class="w"> </span><span class="n">issueMode</span><span class="p">:</span><span class="w"> </span><span class="n">CouponIssueMode</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">CouponIssueMode</span><span class="p">.</span><span class="na">DIRECT</span><span class="p">)</span><span class="w"> </span><span class="o">=</span>
+<span class="w">        </span><span class="n">CouponEvent</span><span class="p">(</span>
+<span class="w">            </span><span class="n">name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">"신규 가입 할인"</span><span class="p">,</span>
+<span class="w">            </span><span class="n">discount</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Discount</span><span class="p">(</span><span class="n">DiscountType</span><span class="p">.</span><span class="na">FIXED_AMOUNT</span><span class="p">,</span><span class="w"> </span><span class="m">5</span><span class="n">_000</span><span class="p">),</span>
+<span class="w">            </span><span class="n">period</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">EventPeriod</span><span class="p">(</span><span class="n">startAt</span><span class="p">,</span><span class="w"> </span><span class="n">endAt</span><span class="p">),</span>
+<span class="w">            </span><span class="n">totalQuantity</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">totalQuantity</span><span class="p">,</span>
+<span class="w">            </span><span class="n">issueMode</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">issueMode</span><span class="p">,</span>
+<span class="w">        </span><span class="p">)</span>
+
+<span class="w">    </span><span class="n">Given</span><span class="p">(</span><span class="s">"11월 1일 10시부터 일주일 동안 열리는 이벤트"</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="kd">val</span><span class="w"> </span><span class="nv">couponEvent</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">couponEvent</span><span class="p">()</span>
+
+<span class="w">        </span><span class="n">Then</span><span class="p">(</span><span class="s">"시작 1초 전에는 UPCOMING"</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="n">couponEvent</span><span class="p">.</span><span class="na">status</span><span class="p">(</span><span class="n">startAt</span><span class="p">.</span><span class="na">minusSeconds</span><span class="p">(</span><span class="m">1</span><span class="p">))</span><span class="w"> </span><span class="n">shouldBe</span><span class="w"> </span><span class="n">CouponEventStatus</span><span class="p">.</span><span class="na">UPCOMING</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="w">        </span><span class="n">Then</span><span class="p">(</span><span class="s">"시작 시각부터 종료 1초 전까지는 ONGOING"</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="n">couponEvent</span><span class="p">.</span><span class="na">status</span><span class="p">(</span><span class="n">startAt</span><span class="p">)</span><span class="w"> </span><span class="n">shouldBe</span><span class="w"> </span><span class="n">CouponEventStatus</span><span class="p">.</span><span class="na">ONGOING</span>
+<span class="w">            </span><span class="n">couponEvent</span><span class="p">.</span><span class="na">status</span><span class="p">(</span><span class="n">endAt</span><span class="p">.</span><span class="na">minusSeconds</span><span class="p">(</span><span class="m">1</span><span class="p">))</span><span class="w"> </span><span class="n">shouldBe</span><span class="w"> </span><span class="n">CouponEventStatus</span><span class="p">.</span><span class="na">ONGOING</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="w">        </span><span class="n">Then</span><span class="p">(</span><span class="s">"종료 시각부터는 ENDED"</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="n">couponEvent</span><span class="p">.</span><span class="na">status</span><span class="p">(</span><span class="n">endAt</span><span class="p">)</span><span class="w"> </span><span class="n">shouldBe</span><span class="w"> </span><span class="n">CouponEventStatus</span><span class="p">.</span><span class="na">ENDED</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="w">    </span><span class="p">}</span>
+</code></pre></div>
+</figure>
+<ul>
+<li><code>class X : BehaviorSpec({ ... })</code>: 클래스 본문 대신 생성자에 람다를 넘깁니다. 람다 안이 테스트 정의입니다.</li>
+<li><code>a shouldBe b</code>: 단언(assert). <code>infix</code> 함수라 연산자처럼 씁니다.</li>
+<li>경계값(시작 1초 전, 시작 시각, 종료 시각)을 문장으로 적어서, 테스트 보고서가 그대로 명세가 됩니다.</li>
+<li>이 테스트가 스프링 없이 가능한 이유는 <a href="04-jpa-with-kotlin.html">4장</a>에서 엔티티가 <code>now</code> 를 인자로 받게 했기 때문입니다.</li>
+</ul>
+<p>예외 단언:</p>
+<figure class="code-block"><figcaption><span class="code-lang">Kotlin</span><button type="button" class="copy-button" aria-label="코드 복사">복사</button></figcaption><div class="highlight"><pre><span></span><code><span class="n">shouldThrow</span><span class="o">&lt;</span><span class="n">ServiceException</span><span class="o">&gt;</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">couponEvent</span><span class="p">.</span><span class="na">issue</span><span class="p">(</span><span class="n">startAt</span><span class="p">)</span><span class="w"> </span><span class="p">}.</span><span class="na">errorCode</span><span class="w"> </span><span class="n">shouldBe</span><span class="w"> </span><span class="n">ErrorCode</span><span class="p">.</span><span class="na">COUPON_SOLD_OUT</span>
+</code></pre></div>
+</figure>
+<h3 id="funspec--withdata--표로-쓰는-테스트">FunSpec + withData — 표로 쓰는 테스트 <a class="header-anchor" href="#funspec--withdata--표로-쓰는-테스트">#</a></h3>
+<p>입력과 기대값이 표가 되는 테스트는 <code>withData</code> 로 씁니다.</p>
+<p><a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/test/kotlin/com/site/domain/coupon/entity/DiscountTest.kt#L11-L34" target="_blank" rel="noopener">DiscountTest.kt</a></p>
+<figure class="code-block"><figcaption><span class="code-lang">Kotlin</span><button type="button" class="copy-button" aria-label="코드 복사">복사</button></figcaption><div class="highlight"><pre><span></span><code><span class="cm">/**</span>
+<span class="cm"> * 입력과 기대값이 표로 정리되는 테스트는 withData 로 쓴다. 행마다 별도의 테스트로 실행되고 이름이 붙는다.</span>
+<span class="cm"> */</span>
+<span class="kd">class</span><span class="w"> </span><span class="nc">DiscountTest</span><span class="w"> </span><span class="p">:</span><span class="w"> </span><span class="n">FunSpec</span><span class="p">({</span>
+
+<span class="w">    </span><span class="n">context</span><span class="p">(</span><span class="s">"할인 값은 방식별 허용 범위 안이어야 한다"</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">withData</span><span class="p">(</span>
+<span class="w">            </span><span class="n">mapOf</span><span class="p">(</span>
+<span class="w">                </span><span class="s">"정액 1원"</span><span class="w"> </span><span class="n">to</span><span class="w"> </span><span class="n">Triple</span><span class="p">(</span><span class="n">DiscountType</span><span class="p">.</span><span class="na">FIXED_AMOUNT</span><span class="p">,</span><span class="w"> </span><span class="m">1</span><span class="p">,</span><span class="w"> </span><span class="kc">true</span><span class="p">),</span>
+<span class="w">                </span><span class="s">"정액 1,000,000원"</span><span class="w"> </span><span class="n">to</span><span class="w"> </span><span class="n">Triple</span><span class="p">(</span><span class="n">DiscountType</span><span class="p">.</span><span class="na">FIXED_AMOUNT</span><span class="p">,</span><span class="w"> </span><span class="m">1</span><span class="n">_000_000</span><span class="p">,</span><span class="w"> </span><span class="kc">true</span><span class="p">),</span>
+<span class="w">                </span><span class="s">"정액 0원"</span><span class="w"> </span><span class="n">to</span><span class="w"> </span><span class="n">Triple</span><span class="p">(</span><span class="n">DiscountType</span><span class="p">.</span><span class="na">FIXED_AMOUNT</span><span class="p">,</span><span class="w"> </span><span class="m">0</span><span class="p">,</span><span class="w"> </span><span class="kc">false</span><span class="p">),</span>
+<span class="w">                </span><span class="s">"정액 1,000,001원"</span><span class="w"> </span><span class="n">to</span><span class="w"> </span><span class="n">Triple</span><span class="p">(</span><span class="n">DiscountType</span><span class="p">.</span><span class="na">FIXED_AMOUNT</span><span class="p">,</span><span class="w"> </span><span class="m">1</span><span class="n">_000_001</span><span class="p">,</span><span class="w"> </span><span class="kc">false</span><span class="p">),</span>
+<span class="w">                </span><span class="s">"정률 1%"</span><span class="w"> </span><span class="n">to</span><span class="w"> </span><span class="n">Triple</span><span class="p">(</span><span class="n">DiscountType</span><span class="p">.</span><span class="na">PERCENTAGE</span><span class="p">,</span><span class="w"> </span><span class="m">1</span><span class="p">,</span><span class="w"> </span><span class="kc">true</span><span class="p">),</span>
+<span class="w">                </span><span class="s">"정률 100%"</span><span class="w"> </span><span class="n">to</span><span class="w"> </span><span class="n">Triple</span><span class="p">(</span><span class="n">DiscountType</span><span class="p">.</span><span class="na">PERCENTAGE</span><span class="p">,</span><span class="w"> </span><span class="m">100</span><span class="p">,</span><span class="w"> </span><span class="kc">true</span><span class="p">),</span>
+<span class="w">                </span><span class="s">"정률 101%"</span><span class="w"> </span><span class="n">to</span><span class="w"> </span><span class="n">Triple</span><span class="p">(</span><span class="n">DiscountType</span><span class="p">.</span><span class="na">PERCENTAGE</span><span class="p">,</span><span class="w"> </span><span class="m">101</span><span class="p">,</span><span class="w"> </span><span class="kc">false</span><span class="p">),</span>
+<span class="w">            </span><span class="p">),</span>
+<span class="w">        </span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="p">(</span><span class="n">type</span><span class="p">,</span><span class="w"> </span><span class="n">value</span><span class="p">,</span><span class="w"> </span><span class="n">valid</span><span class="p">)</span><span class="w"> </span><span class="o">-&gt;</span>
+<span class="w">            </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">valid</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">                </span><span class="n">shouldNotThrowAny</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">Discount</span><span class="p">(</span><span class="n">type</span><span class="p">,</span><span class="w"> </span><span class="n">value</span><span class="p">)</span><span class="w"> </span><span class="p">}</span>
+<span class="w">            </span><span class="p">}</span><span class="w"> </span><span class="k">else</span><span class="w"> </span><span class="p">{</span>
+<span class="w">                </span><span class="n">shouldThrow</span><span class="o">&lt;</span><span class="n">ServiceException</span><span class="o">&gt;</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">Discount</span><span class="p">(</span><span class="n">type</span><span class="p">,</span><span class="w"> </span><span class="n">value</span><span class="p">)</span><span class="w"> </span><span class="p">}.</span><span class="na">errorCode</span><span class="w"> </span><span class="n">shouldBe</span><span class="w"> </span><span class="n">ErrorCode</span><span class="p">.</span><span class="na">INVALID_DISCOUNT_VALUE</span>
+<span class="w">            </span><span class="p">}</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="w">    </span><span class="p">}</span>
+</code></pre></div>
+</figure>
+<ul>
+<li><code>&quot;이름&quot; to 값</code> 은 <code>Pair</code> 를 만드는 infix 함수입니다. <code>mapOf</code> 의 키가 테스트 이름이 됩니다.</li>
+<li><code>{ (type, value, valid) -&gt; ... }</code> 는 <code>Triple</code> 을 구조 분해합니다.</li>
+<li>7줄이 7개의 테스트로 따로 실행되어, 어느 행이 실패했는지 바로 보입니다.</li>
+</ul>
+<h3 id="격리--테스트마다-새-인스턴스">격리 — 테스트마다 새 인스턴스 <a class="header-anchor" href="#격리--테스트마다-새-인스턴스">#</a></h3>
+<p><a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/test/kotlin/io/kotest/provided/ProjectConfig.kt" target="_blank" rel="noopener">ProjectConfig.kt</a></p>
+<figure class="code-block"><figcaption><span class="code-lang">Kotlin</span><button type="button" class="copy-button" aria-label="코드 복사">복사</button></figcaption><div class="highlight"><pre><span></span><code><span class="cm">/**</span>
+<span class="cm"> * Kotest 전역 설정. 이 패키지·이름(io.kotest.provided.ProjectConfig)이면 Kotest 가 자동으로 찾는다.</span>
+<span class="cm"> *</span>
+<span class="cm"> * 기본값(SingleInstance)은 스펙 인스턴스 하나를 모든 테스트가 공유해서, Given 블록에서 만든 객체를</span>
+<span class="cm"> * 한 Then 이 바꾸면 다음 Then 이 바뀐 객체를 보게 된다. 테스트(leaf)마다 새 인스턴스로 실행해 서로 섞이지 않게 한다.</span>
+<span class="cm"> */</span>
+<span class="kd">object</span><span class="w"> </span><span class="nc">ProjectConfig</span><span class="w"> </span><span class="p">:</span><span class="w"> </span><span class="n">AbstractProjectConfig</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kd">override</span><span class="w"> </span><span class="kd">val</span><span class="w"> </span><span class="nv">isolationMode</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">IsolationMode</span><span class="p">.</span><span class="na">InstancePerLeaf</span>
+<span class="p">}</span>
+</code></pre></div>
+</figure>
+<p><code>InstancePerLeaf</code> 덕분에 각 <code>Then</code>(가장 안쪽 블록)이 실행될 때마다 바깥 블록이 처음부터 다시 실행됩니다. 앞의 <code>Then</code> 이 <code>couponEvent.issue()</code> 를 불러도 다음 <code>Then</code> 은 새 객체를 봅니다.</p>
+<h2 id="3-mockk--가짜-의존성">3. MockK — 가짜 의존성 <a class="header-anchor" href="#3-mockk--가짜-의존성">#</a></h2>
+<p><a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/test/kotlin/com/site/domain/member/service/MemberServiceTest.kt#L17-L50" target="_blank" rel="noopener">MemberServiceTest.kt</a></p>
+<figure class="code-block"><figcaption><span class="code-lang">Kotlin</span><button type="button" class="copy-button" aria-label="코드 복사">복사</button></figcaption><div class="highlight"><pre><span></span><code><span class="cm">/** MockK 로 리포지토리를 대신한다. 스펙은 테스트(leaf)마다 새로 만들어지므로 목도 매번 새것이다. (ProjectConfig) */</span>
+<span class="kd">class</span><span class="w"> </span><span class="nc">MemberServiceTest</span><span class="w"> </span><span class="p">:</span><span class="w"> </span><span class="n">BehaviorSpec</span><span class="p">({</span>
+
+<span class="w">    </span><span class="kd">val</span><span class="w"> </span><span class="nv">memberRepository</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">mockk</span><span class="o">&lt;</span><span class="n">MemberRepository</span><span class="o">&gt;</span><span class="p">()</span>
+<span class="w">    </span><span class="kd">val</span><span class="w"> </span><span class="nv">passwordEncoder</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">mockk</span><span class="o">&lt;</span><span class="n">PasswordEncoder</span><span class="o">&gt;</span><span class="p">()</span>
+<span class="w">    </span><span class="kd">val</span><span class="w"> </span><span class="nv">memberService</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">MemberService</span><span class="p">(</span><span class="n">memberRepository</span><span class="p">,</span><span class="w"> </span><span class="n">passwordEncoder</span><span class="p">)</span>
+
+<span class="w">    </span><span class="n">every</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">passwordEncoder</span><span class="p">.</span><span class="na">encode</span><span class="p">(</span><span class="s">"password123"</span><span class="p">)</span><span class="w"> </span><span class="p">}</span><span class="w"> </span><span class="n">returns</span><span class="w"> </span><span class="s">"{bcrypt}encoded"</span>
+
+<span class="w">    </span><span class="kd">fun</span><span class="w"> </span><span class="nf">signUp</span><span class="p">()</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">memberService</span><span class="p">.</span><span class="na">signUp</span><span class="p">(</span><span class="n">email</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">"user@test.com"</span><span class="p">,</span><span class="w"> </span><span class="n">rawPassword</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">"password123"</span><span class="p">,</span><span class="w"> </span><span class="n">nickname</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">"tester"</span><span class="p">)</span>
+
+<span class="w">    </span><span class="n">Given</span><span class="p">(</span><span class="s">"처음 쓰는 이메일"</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">every</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">memberRepository</span><span class="p">.</span><span class="na">existsByEmail</span><span class="p">(</span><span class="s">"user@test.com"</span><span class="p">)</span><span class="w"> </span><span class="p">}</span><span class="w"> </span><span class="n">returns</span><span class="w"> </span><span class="kc">false</span>
+
+<span class="w">        </span><span class="n">When</span><span class="p">(</span><span class="s">"가입하면"</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="kd">val</span><span class="w"> </span><span class="nv">saved</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">slot</span><span class="o">&lt;</span><span class="n">Member</span><span class="o">&gt;</span><span class="p">()</span>
+<span class="w">            </span><span class="n">every</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">memberRepository</span><span class="p">.</span><span class="na">saveAndFlush</span><span class="p">(</span><span class="n">capture</span><span class="p">(</span><span class="n">saved</span><span class="p">))</span><span class="w"> </span><span class="p">}</span><span class="w"> </span><span class="n">answers</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">saved</span><span class="p">.</span><span class="na">captured</span><span class="w"> </span><span class="p">}</span>
+
+<span class="w">            </span><span class="n">signUp</span><span class="p">()</span>
+
+<span class="w">            </span><span class="n">Then</span><span class="p">(</span><span class="s">"비밀번호를 인코딩해서 저장한다"</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">                </span><span class="n">saved</span><span class="p">.</span><span class="na">captured</span><span class="p">.</span><span class="na">password</span><span class="w"> </span><span class="n">shouldBe</span><span class="w"> </span><span class="s">"{bcrypt}encoded"</span>
+<span class="w">                </span><span class="n">saved</span><span class="p">.</span><span class="na">captured</span><span class="p">.</span><span class="na">email</span><span class="w"> </span><span class="n">shouldBe</span><span class="w"> </span><span class="s">"user@test.com"</span>
+<span class="w">            </span><span class="p">}</span>
+<span class="w">        </span><span class="p">}</span>
+
+<span class="w">        </span><span class="n">When</span><span class="p">(</span><span class="s">"중복 검사는 통과했지만 동시에 같은 이메일로 가입한 요청이 먼저 저장되면"</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="n">every</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">memberRepository</span><span class="p">.</span><span class="na">saveAndFlush</span><span class="p">(</span><span class="n">any</span><span class="p">())</span><span class="w"> </span><span class="p">}</span><span class="w"> </span><span class="n">throws</span><span class="w"> </span><span class="n">DataIntegrityViolationException</span><span class="p">(</span><span class="s">"Duplicate entry"</span><span class="p">)</span>
+
+<span class="w">            </span><span class="n">Then</span><span class="p">(</span><span class="s">"unique 제약 위반을 DUPLICATE_EMAIL 로 바꿔 알려준다"</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">                </span><span class="n">shouldThrow</span><span class="o">&lt;</span><span class="n">ServiceException</span><span class="o">&gt;</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">signUp</span><span class="p">()</span><span class="w"> </span><span class="p">}.</span><span class="na">errorCode</span><span class="w"> </span><span class="n">shouldBe</span><span class="w"> </span><span class="n">ErrorCode</span><span class="p">.</span><span class="na">DUPLICATE_EMAIL</span>
+<span class="w">            </span><span class="p">}</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="w">    </span><span class="p">}</span>
+</code></pre></div>
+</figure>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>MockK</th>
+<th>뜻</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>mockk&lt;T&gt;()</code></td>
+<td>T 의 가짜. 정해 주지 않은 호출은 예외</td>
+</tr>
+<tr>
+<td><code>every { 호출 } returns 값</code></td>
+<td>이 호출이 오면 이 값을 돌려준다</td>
+</tr>
+<tr>
+<td><code>every { ... } answers { ... }</code></td>
+<td>돌려줄 값을 그때 계산</td>
+</tr>
+<tr>
+<td><code>every { ... } throws 예외</code></td>
+<td>예외를 던진다</td>
+</tr>
+<tr>
+<td><code>slot&lt;T&gt;()</code> + <code>capture(slot)</code></td>
+<td>넘어온 인자를 잡아 둔다</td>
+</tr>
+<tr>
+<td><code>verify(exactly = n) { 호출 }</code></td>
+<td>정확히 n 번 불렸는지</td>
+</tr>
+</tbody>
+</table></div>
+<p>생성자 주입(<a href="02-spring-meets-kotlin.html">2장</a>) 덕분에 <code>MemberService(가짜, 가짜)</code> 로 바로 만듭니다. 스프링이 필요 없습니다.</p>
+<p>&quot;동시에 같은 이메일로 가입&quot; 같은 경쟁 상황도, DB 가 던질 예외를 흉내 내면 단위 테스트로 확인할 수 있습니다.</p>
+<h3 id="확장-함수는-모킹하기-번거롭다">확장 함수는 모킹하기 번거롭다 <a class="header-anchor" href="#확장-함수는-모킹하기-번거롭다">#</a></h3>
+<p><code>findByIdOrNull</code> 은 Spring Data 의 확장 함수입니다. 확장 함수는 사실 정적 함수라 <code>every { repo.findByIdOrNull(1L) }</code> 로 잡기 어렵습니다. 대신 그 안에서 부르는 <code>findById</code> 를 모킹합니다.</p>
+<p><a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/test/kotlin/com/site/domain/coupon/service/StartedCouponEventCacheTest.kt#L22-L49" target="_blank" rel="noopener">StartedCouponEventCacheTest.kt</a></p>
+<figure class="code-block"><figcaption><span class="code-lang">Kotlin</span><button type="button" class="copy-button" aria-label="코드 복사">복사</button></figcaption><div class="highlight"><pre><span></span><code><span class="kd">class</span><span class="w"> </span><span class="nc">StartedCouponEventCacheTest</span><span class="w"> </span><span class="p">:</span><span class="w"> </span><span class="n">FunSpec</span><span class="p">({</span>
+
+<span class="w">    </span><span class="kd">val</span><span class="w"> </span><span class="nv">start</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">LocalDateTime</span><span class="p">.</span><span class="na">of</span><span class="p">(</span><span class="m">2026</span><span class="p">,</span><span class="w"> </span><span class="m">10</span><span class="p">,</span><span class="w"> </span><span class="m">26</span><span class="p">,</span><span class="w"> </span><span class="m">12</span><span class="p">,</span><span class="w"> </span><span class="m">0</span><span class="p">)</span>
+<span class="w">    </span><span class="kd">var</span><span class="w"> </span><span class="nv">now</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">start</span><span class="p">.</span><span class="na">plusMinutes</span><span class="p">(</span><span class="m">1</span><span class="p">)</span>
+<span class="w">    </span><span class="kd">val</span><span class="w"> </span><span class="nv">clock</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">mockk</span><span class="o">&lt;</span><span class="n">Clock</span><span class="o">&gt;</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">every</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">zone</span><span class="w"> </span><span class="p">}</span><span class="w"> </span><span class="n">returns</span><span class="w"> </span><span class="n">ClockConfig</span><span class="p">.</span><span class="na">SERVICE_ZONE</span>
+<span class="w">        </span><span class="n">every</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">instant</span><span class="p">()</span><span class="w"> </span><span class="p">}</span><span class="w"> </span><span class="n">answers</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">now</span><span class="p">.</span><span class="na">atZone</span><span class="p">(</span><span class="n">ClockConfig</span><span class="p">.</span><span class="na">SERVICE_ZONE</span><span class="p">).</span><span class="na">toInstant</span><span class="p">()</span><span class="w"> </span><span class="p">}</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">    </span><span class="kd">val</span><span class="w"> </span><span class="nv">couponEventRepository</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">mockk</span><span class="o">&lt;</span><span class="n">CouponEventRepository</span><span class="o">&gt;</span><span class="p">()</span>
+<span class="w">    </span><span class="kd">val</span><span class="w"> </span><span class="nv">cache</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">StartedCouponEventCache</span><span class="p">(</span><span class="n">couponEventRepository</span><span class="p">,</span><span class="w"> </span><span class="n">clock</span><span class="p">)</span>
+
+<span class="w">    </span><span class="kd">fun</span><span class="w"> </span><span class="nf">givenEvent</span><span class="p">(</span><span class="n">couponEvent</span><span class="p">:</span><span class="w"> </span><span class="n">CouponEvent</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="c1">// findByIdOrNull 은 확장 함수라 내부에서 부르는 findById 를 모킹한다</span>
+<span class="w">        </span><span class="n">every</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">couponEventRepository</span><span class="p">.</span><span class="na">findById</span><span class="p">(</span><span class="m">1L</span><span class="p">)</span><span class="w"> </span><span class="p">}</span><span class="w"> </span><span class="n">returns</span><span class="w"> </span><span class="n">Optional</span><span class="p">.</span><span class="na">of</span><span class="p">(</span><span class="n">couponEvent</span><span class="p">)</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="kd">fun</span><span class="w"> </span><span class="nf">event</span><span class="p">(</span><span class="n">totalQuantity</span><span class="p">:</span><span class="w"> </span><span class="kt">Int</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="m">100</span><span class="p">,</span><span class="w"> </span><span class="n">issueMode</span><span class="p">:</span><span class="w"> </span><span class="n">CouponIssueMode</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">CouponIssueMode</span><span class="p">.</span><span class="na">DIRECT</span><span class="p">)</span><span class="w"> </span><span class="o">=</span>
+<span class="w">        </span><span class="n">couponEventFixture</span><span class="p">(</span><span class="n">startAt</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">start</span><span class="p">,</span><span class="w"> </span><span class="n">endAt</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">start</span><span class="p">.</span><span class="na">plusHours</span><span class="p">(</span><span class="m">1</span><span class="p">),</span><span class="w"> </span><span class="n">totalQuantity</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">totalQuantity</span><span class="p">,</span><span class="w"> </span><span class="n">issueMode</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">issueMode</span><span class="p">)</span>
+
+<span class="w">    </span><span class="kd">fun</span><span class="w"> </span><span class="nf">errorCodeOf</span><span class="p">(</span><span class="n">mode</span><span class="p">:</span><span class="w"> </span><span class="n">CouponIssueMode</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">CouponIssueMode</span><span class="p">.</span><span class="na">DIRECT</span><span class="p">)</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">shouldThrow</span><span class="o">&lt;</span><span class="n">ServiceException</span><span class="o">&gt;</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">cache</span><span class="p">.</span><span class="na">checkIssuable</span><span class="p">(</span><span class="m">1L</span><span class="p">,</span><span class="w"> </span><span class="n">mode</span><span class="p">)</span><span class="w"> </span><span class="p">}.</span><span class="na">errorCode</span>
+
+<span class="w">    </span><span class="n">test</span><span class="p">(</span><span class="s">"진행 중인 이벤트는 처음 한 번만 DB 에서 읽는다"</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">givenEvent</span><span class="p">(</span><span class="n">event</span><span class="p">())</span>
+
+<span class="w">        </span><span class="n">repeat</span><span class="p">(</span><span class="m">3</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">cache</span><span class="p">.</span><span class="na">checkIssuable</span><span class="p">(</span><span class="m">1L</span><span class="p">,</span><span class="w"> </span><span class="n">CouponIssueMode</span><span class="p">.</span><span class="na">DIRECT</span><span class="p">)</span><span class="w"> </span><span class="p">}</span>
+
+<span class="w">        </span><span class="n">verify</span><span class="p">(</span><span class="n">exactly</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="m">1</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">couponEventRepository</span><span class="p">.</span><span class="na">findById</span><span class="p">(</span><span class="m">1L</span><span class="p">)</span><span class="w"> </span><span class="p">}</span>
+<span class="w">    </span><span class="p">}</span>
+</code></pre></div>
+</figure>
+<p>이 테스트에는 요령이 두 가지 더 있습니다.</p>
+<ul>
+<li><strong>움직이는 시계</strong>: <code>Clock</code> 을 MockK 로 만들고 <code>instant()</code> 가 바깥 변수 <code>now</code> 를 읽게 했습니다. 테스트 중에 <code>now = start.plusHours(1)</code> 로 바꾸면 &quot;시간이 흐른&quot; 상황이 됩니다. <code>answers { }</code> 는 호출될 때마다 블록을 다시 실행하므로 바뀐 값을 읽습니다.</li>
+<li><strong>&quot;DB 를 안 읽는다&quot;를 숫자로</strong>: 캐시의 목적은 DB 를 덜 읽는 것이므로, <code>verify(exactly = 1)</code> 로 리포지토리 호출 횟수를 셉니다.</li>
+</ul>
+<h2 id="4-통합-테스트--운영과-같은-db-로">4. 통합 테스트 — 운영과 같은 DB 로 <a class="header-anchor" href="#4-통합-테스트--운영과-같은-db-로">#</a></h2>
+<h3 id="testcontainers">Testcontainers <a class="header-anchor" href="#testcontainers">#</a></h3>
+<p><a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/test/kotlin/com/site/support/TestContainersConfig.kt#L10-L30" target="_blank" rel="noopener">TestContainersConfig.kt</a></p>
+<figure class="code-block"><figcaption><span class="code-lang">Kotlin</span><button type="button" class="copy-button" aria-label="코드 복사">복사</button></figcaption><div class="highlight"><pre><span></span><code><span class="cm">/**</span>
+<span class="cm"> * 테스트용 MySQL / Redis 컨테이너를 스프링 빈으로 띄운다.</span>
+<span class="cm"> * @ServiceConnection 이 컨테이너의 접속 정보를 DataSource / Redis 설정으로 등록해주므로 properties 에 적을 필요가 없다.</span>
+<span class="cm"> * (Redisson 도 이 접속 정보를 그대로 읽는다)</span>
+<span class="cm"> *</span>
+<span class="cm"> * H2 대신 운영과 같은 MySQL 을 쓰는 이유: 락·격리 수준 동작과 DDL(컬럼 타입)이 MySQL 과 달라서</span>
+<span class="cm"> * 동시성 테스트나 스키마 문제를 H2 로는 제대로 검증할 수 없다.</span>
+<span class="cm"> */</span>
+<span class="nd">@TestConfiguration</span><span class="p">(</span><span class="n">proxyBeanMethods</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="kc">false</span><span class="p">)</span>
+<span class="kd">class</span><span class="w"> </span><span class="nc">TestContainersConfig</span><span class="w"> </span><span class="p">{</span>
+
+<span class="w">    </span><span class="nd">@Bean</span>
+<span class="w">    </span><span class="nd">@ServiceConnection</span>
+<span class="w">    </span><span class="kd">fun</span><span class="w"> </span><span class="nf">mysqlContainer</span><span class="p">():</span><span class="w"> </span><span class="n">MySQLContainer</span><span class="o">&lt;*&gt;</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">MySQLContainer</span><span class="p">(</span><span class="n">DockerImageName</span><span class="p">.</span><span class="na">parse</span><span class="p">(</span><span class="s">"mysql:8.4"</span><span class="p">))</span>
+
+<span class="w">    </span><span class="nd">@Bean</span>
+<span class="w">    </span><span class="nd">@ServiceConnection</span><span class="p">(</span><span class="n">name</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">"redis"</span><span class="p">)</span>
+<span class="w">    </span><span class="kd">fun</span><span class="w"> </span><span class="nf">redisContainer</span><span class="p">():</span><span class="w"> </span><span class="n">GenericContainer</span><span class="o">&lt;*&gt;</span><span class="w"> </span><span class="o">=</span>
+<span class="w">        </span><span class="n">GenericContainer</span><span class="p">(</span><span class="n">DockerImageName</span><span class="p">.</span><span class="na">parse</span><span class="p">(</span><span class="s">"redis:7.4-alpine"</span><span class="p">))</span>
+<span class="w">            </span><span class="p">.</span><span class="na">withExposedPorts</span><span class="p">(</span><span class="m">6379</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></div>
+</figure>
+<p>테스트가 시작되면 Docker 로 MySQL 8.4 와 Redis 7.4 를 띄우고, 접속 정보를 스프링에 연결합니다. 테스트 DB 는 처음에 H2(메모리 DB)였다가 이것으로 바꿨습니다(커밋 <code>1952c61</code>). 이 프로젝트의 핵심이 행 잠금·격리 수준인데, H2 는 MySQL 과 다르게 동작하기 때문입니다.</p>
+<h3 id="메타-애너테이션-하나로">메타 애너테이션 하나로 <a class="header-anchor" href="#메타-애너테이션-하나로">#</a></h3>
+<p><a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/test/kotlin/com/site/support/IntegrationTest.kt#L9-L21" target="_blank" rel="noopener">IntegrationTest.kt</a></p>
+<figure class="code-block"><figcaption><span class="code-lang">Kotlin</span><button type="button" class="copy-button" aria-label="코드 복사">복사</button></figcaption><div class="highlight"><pre><span></span><code><span class="cm">/**</span>
+<span class="cm"> * 통합 테스트용 메타 애너테이션.</span>
+<span class="cm"> * 모든 통합 테스트가 같은 설정 조합을 쓰게 해서 스프링 컨텍스트(와 Redis 컨테이너)를 한 번만 띄우고 재사용한다.</span>
+<span class="cm"> */</span>
+<span class="nd">@Target</span><span class="p">(</span><span class="n">AnnotationTarget</span><span class="p">.</span><span class="na">CLASS</span><span class="p">)</span>
+<span class="nd">@Retention</span><span class="p">(</span><span class="n">AnnotationRetention</span><span class="p">.</span><span class="na">RUNTIME</span><span class="p">)</span>
+<span class="nd">@SpringBootTest</span>
+<span class="nd">@AutoConfigureMockMvc</span>
+<span class="c1">// 테스트는 기본적으로 지표 내보내기를 끈다. 운영과 같은 Prometheus 레지스트리를 쓰도록 켠다</span>
+<span class="nd">@AutoConfigureObservability</span><span class="p">(</span><span class="n">tracing</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="kc">false</span><span class="p">)</span>
+<span class="nd">@ActiveProfiles</span><span class="p">(</span><span class="s">"test"</span><span class="p">)</span>
+<span class="nd">@Import</span><span class="p">(</span><span class="n">TestContainersConfig</span><span class="o">::</span><span class="n">class</span><span class="p">,</span><span class="w"> </span><span class="n">TestAuthHelper</span><span class="o">::</span><span class="n">class</span><span class="p">,</span><span class="w"> </span><span class="n">FakeAlimtalkSender</span><span class="o">::</span><span class="n">class</span><span class="p">,</span><span class="w"> </span><span class="n">LearningCouponIssueStrategies</span><span class="o">::</span><span class="n">class</span><span class="p">)</span>
+<span class="kd">annotation</span><span class="w"> </span><span class="kd">class</span><span class="w"> </span><span class="nc">IntegrationTest</span>
+</code></pre></div>
+</figure>
+<p>스프링은 <strong>설정 조합이 같은 테스트끼리 컨텍스트를 재사용</strong>합니다. 테스트 클래스마다 애너테이션을 조금씩 다르게 붙이면 컨텍스트(와 컨테이너)를 여러 번 띄워 느려집니다. 메타 애너테이션 하나로 조합을 고정했습니다.</p>
+<p><code>@Import</code> 한 도우미들:</p>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>도우미</th>
+<th>하는 일</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>TestAuthHelper</code></td>
+<td>회원을 만들고 로그인해서 access token 을 돌려준다</td>
+</tr>
+<tr>
+<td><code>FakeAlimtalkSender</code></td>
+<td><code>@Primary</code> 로 진짜 발송기를 대신한다. 받은 메시지를 기록하고, 지연·실패를 흉내 낸다</td>
+</tr>
+<tr>
+<td><code>LearningCouponIssueStrategies</code></td>
+<td>운영에서 뺀 &quot;락 없음&quot;·&quot;비관적 락&quot; 구현 (<a href="07-concurrency.html">7장</a>)</td>
+</tr>
+</tbody>
+</table></div>
+<p>이들은 <code>@Component</code> 가 아니라 <code>@TestComponent</code> 입니다. (<a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/test/kotlin/com/site/support/TestAuthHelper.kt" target="_blank" rel="noopener">TestAuthHelper.kt</a> 주석: &quot;src/test 아래의 일반 @Component 는 com.site 패키지 스캔에 걸려 의도치 않게 등록될 수 있다&quot;)</p>
+<h3 id="스케줄러는-끄고-직접-부른다">스케줄러는 끄고 직접 부른다 <a class="header-anchor" href="#스케줄러는-끄고-직접-부른다">#</a></h3>
+<p><a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/test/resources/application-test.properties" target="_blank" rel="noopener">application-test.properties</a></p>
+<figure class="code-block"><figcaption><span class="code-lang">properties</span><button type="button" class="copy-button" aria-label="코드 복사">복사</button></figcaption><div class="highlight"><pre><span></span><code><span class="c1"># 알림 Outbox: 재시도를 바로 하고, 스케줄러는 꺼서 테스트가 직접 처리 시점을 정한다</span>
+<span class="na">notification.outbox.backoff</span><span class="o">=</span><span class="s">0s</span>
+<span class="na">notification.outbox.max-attempts</span><span class="o">=</span><span class="s">3</span>
+<span class="na">notification.outbox.scheduler.enabled</span><span class="o">=</span><span class="s">false</span>
+
+<span class="c1"># 대기열 워커는 테스트에서 직접 호출한다 (스케줄러가 몰래 돌면 결과를 예측할 수 없다)</span>
+<span class="na">coupon.queue.scheduler.enabled</span><span class="o">=</span><span class="s">false</span>
+</code></pre></div>
+</figure>
+<p>스케줄러가 200ms 마다 몰래 돌면, 테스트가 &quot;워커가 돌기 전&quot; 상태를 확인하려는 순간 이미 처리돼 있을 수 있습니다. 끄고 <code>couponQueueWorker.processAll()</code> 을 원하는 시점에 직접 부릅니다. 이것이 <a href="02-spring-meets-kotlin.html">2장</a>에서 <code>@ConditionalOnProperty</code> 를 스케줄러에 붙인 이유입니다.</p>
+<h3 id="테스트끼리-섞이지-않게">테스트끼리 섞이지 않게 <a class="header-anchor" href="#테스트끼리-섞이지-않게">#</a></h3>
+<p>컨텍스트를 공유하므로 DB·Redis 도 공유합니다. 각 테스트가 끝나면 지웁니다.</p>
+<figure class="code-block"><figcaption><span class="code-lang">Kotlin</span><button type="button" class="copy-button" aria-label="코드 복사">복사</button></figcaption><div class="highlight"><pre><span></span><code><span class="c1">// CouponQueueTest.kt</span>
+<span class="w">    </span><span class="nd">@AfterEach</span>
+<span class="w">    </span><span class="kd">fun</span><span class="w"> </span><span class="nf">tearDown</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">issuedCouponRepository</span><span class="p">.</span><span class="na">deleteAllInBatch</span><span class="p">()</span>
+<span class="w">        </span><span class="n">couponEventRepository</span><span class="p">.</span><span class="na">deleteAllInBatch</span><span class="p">()</span>
+<span class="w">        </span><span class="n">redisTemplate</span><span class="p">.</span><span class="na">flushDb</span><span class="p">()</span>
+<span class="w">    </span><span class="p">}</span>
+</code></pre></div>
+</figure>
+<h2 id="5-동시성-테스트--한-번에-출발시키기">5. 동시성 테스트 — 한 번에 출발시키기 <a class="header-anchor" href="#5-동시성-테스트--한-번에-출발시키기">#</a></h2>
+<p>스레드 300개를 그냥 띄우면 앞의 스레드가 끝난 뒤에 뒤의 스레드가 시작해서 겹치지 않을 수 있습니다. <strong>모두 출발선에 세웠다가 동시에 출발</strong>시킵니다.</p>
+<p><a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/test/kotlin/com/site/domain/coupon/service/CouponIssueConcurrencyTest.kt#L237-L276" target="_blank" rel="noopener">CouponIssueConcurrencyTest.kt</a></p>
+<figure class="code-block"><figcaption><span class="code-lang">Kotlin</span><button type="button" class="copy-button" aria-label="코드 복사">복사</button></figcaption><div class="highlight"><pre><span></span><code><span class="cm">/**</span>
+<span class="cm"> * 요청 requestCount 개를 스레드 THREAD_COUNT 개로 동시에 보낸다.</span>
+<span class="cm"> * startSignal 로 모든 작업을 대기시켰다가 한 번에 출발시켜서, 요청이 최대한 겹치게 만든다.</span>
+<span class="cm"> *</span>
+<span class="cm"> * issue 파라미터에는 learningStrategies::issueWithoutLock 같은 "함수 참조"를 넘긴다.</span>
+<span class="cm"> */</span>
+<span class="kd">private</span><span class="w"> </span><span class="kd">fun</span><span class="w"> </span><span class="nf">issueConcurrently</span><span class="p">(</span>
+<span class="w">    </span><span class="n">label</span><span class="p">:</span><span class="w"> </span><span class="kt">String</span><span class="p">,</span>
+<span class="w">    </span><span class="n">issue</span><span class="p">:</span><span class="w"> </span><span class="p">(</span><span class="kt">Long</span><span class="p">,</span><span class="w"> </span><span class="kt">Long</span><span class="p">)</span><span class="w"> </span><span class="o">-&gt;</span><span class="w"> </span><span class="n">IssuedCoupon</span><span class="p">,</span>
+<span class="w">    </span><span class="n">requestCount</span><span class="p">:</span><span class="w"> </span><span class="kt">Int</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">REQUEST_COUNT</span><span class="p">,</span>
+<span class="w">    </span><span class="n">memberIdOf</span><span class="p">:</span><span class="w"> </span><span class="p">(</span><span class="kt">Int</span><span class="p">)</span><span class="w"> </span><span class="o">-&gt;</span><span class="w"> </span><span class="kt">Long</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">index</span><span class="w"> </span><span class="o">-&gt;</span><span class="w"> </span><span class="n">index</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="m">1L</span><span class="w"> </span><span class="p">},</span>
+<span class="p">):</span><span class="w"> </span><span class="n">IssueResult</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kd">val</span><span class="w"> </span><span class="nv">couponEventId</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">couponEventRepository</span><span class="p">.</span><span class="na">save</span><span class="p">(</span><span class="n">couponEventFixture</span><span class="p">(</span><span class="n">totalQuantity</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">TOTAL_QUANTITY</span><span class="p">)).</span><span class="na">id</span>
+
+<span class="w">    </span><span class="kd">val</span><span class="w"> </span><span class="nv">executor</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Executors</span><span class="p">.</span><span class="na">newFixedThreadPool</span><span class="p">(</span><span class="n">THREAD_COUNT</span><span class="p">)</span>
+<span class="w">    </span><span class="kd">val</span><span class="w"> </span><span class="nv">startSignal</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">CountDownLatch</span><span class="p">(</span><span class="m">1</span><span class="p">)</span>
+<span class="w">    </span><span class="kd">val</span><span class="w"> </span><span class="nv">doneSignal</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">CountDownLatch</span><span class="p">(</span><span class="n">requestCount</span><span class="p">)</span>
+<span class="w">    </span><span class="kd">val</span><span class="w"> </span><span class="nv">successCount</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">AtomicInteger</span><span class="p">()</span>
+<span class="w">    </span><span class="kd">val</span><span class="w"> </span><span class="nv">failReasons</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">ConcurrentHashMap</span><span class="o">&lt;</span><span class="kt">String</span><span class="p">,</span><span class="w"> </span><span class="n">AtomicInteger</span><span class="o">&gt;</span><span class="p">()</span>
+
+<span class="w">    </span><span class="n">repeat</span><span class="p">(</span><span class="n">requestCount</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">index</span><span class="w"> </span><span class="o">-&gt;</span>
+<span class="w">        </span><span class="n">executor</span><span class="p">.</span><span class="na">execute</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="k">try</span><span class="w"> </span><span class="p">{</span>
+<span class="w">                </span><span class="n">startSignal</span><span class="p">.</span><span class="na">await</span><span class="p">()</span>
+<span class="w">                </span><span class="n">issue</span><span class="p">(</span><span class="n">couponEventId</span><span class="p">,</span><span class="w"> </span><span class="n">memberIdOf</span><span class="p">(</span><span class="n">index</span><span class="p">))</span>
+<span class="w">                </span><span class="n">successCount</span><span class="p">.</span><span class="na">incrementAndGet</span><span class="p">()</span>
+<span class="w">            </span><span class="p">}</span><span class="w"> </span><span class="k">catch</span><span class="w"> </span><span class="p">(</span><span class="n">e</span><span class="p">:</span><span class="w"> </span><span class="n">Exception</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">                </span><span class="kd">val</span><span class="w"> </span><span class="nv">reason</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="p">(</span><span class="n">e</span><span class="w"> </span><span class="k">as?</span><span class="w"> </span><span class="n">ServiceException</span><span class="p">)</span><span class="o">?.</span><span class="na">errorCode</span><span class="o">?.</span><span class="na">name</span><span class="w"> </span><span class="o">?:</span><span class="w"> </span><span class="n">e</span><span class="p">.</span><span class="na">javaClass</span><span class="p">.</span><span class="na">simpleName</span>
+<span class="w">                </span><span class="n">failReasons</span><span class="p">.</span><span class="na">computeIfAbsent</span><span class="p">(</span><span class="n">reason</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">AtomicInteger</span><span class="p">()</span><span class="w"> </span><span class="p">}.</span><span class="na">incrementAndGet</span><span class="p">()</span>
+<span class="w">            </span><span class="p">}</span><span class="w"> </span><span class="k">finally</span><span class="w"> </span><span class="p">{</span>
+<span class="w">                </span><span class="n">doneSignal</span><span class="p">.</span><span class="na">countDown</span><span class="p">()</span>
+<span class="w">            </span><span class="p">}</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="kd">val</span><span class="w"> </span><span class="nv">startedAt</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">System</span><span class="p">.</span><span class="na">nanoTime</span><span class="p">()</span>
+<span class="w">    </span><span class="n">startSignal</span><span class="p">.</span><span class="na">countDown</span><span class="p">()</span>
+<span class="w">    </span><span class="n">check</span><span class="p">(</span><span class="n">doneSignal</span><span class="p">.</span><span class="na">await</span><span class="p">(</span><span class="m">1</span><span class="p">,</span><span class="w"> </span><span class="n">TimeUnit</span><span class="p">.</span><span class="na">MINUTES</span><span class="p">))</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="s">"동시 요청이 1분 안에 끝나지 않았습니다"</span><span class="w"> </span><span class="p">}</span>
+<span class="w">    </span><span class="kd">val</span><span class="w"> </span><span class="nv">elapsedMillis</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">TimeUnit</span><span class="p">.</span><span class="na">NANOSECONDS</span><span class="p">.</span><span class="na">toMillis</span><span class="p">(</span><span class="n">System</span><span class="p">.</span><span class="na">nanoTime</span><span class="p">()</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">startedAt</span><span class="p">)</span>
+<span class="w">    </span><span class="n">executor</span><span class="p">.</span><span class="na">shutdown</span><span class="p">()</span>
+</code></pre></div>
+</figure>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>도구</th>
+<th>역할</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>startSignal = CountDownLatch(1)</code></td>
+<td>출발 신호. 모든 작업이 <code>await()</code> 로 대기</td>
+</tr>
+<tr>
+<td><code>startSignal.countDown()</code></td>
+<td>동시에 출발</td>
+</tr>
+<tr>
+<td><code>doneSignal = CountDownLatch(requestCount)</code></td>
+<td>모두 끝날 때까지 기다리기 (최대 1분)</td>
+</tr>
+<tr>
+<td><code>AtomicInteger</code>, <code>ConcurrentHashMap</code></td>
+<td>여러 스레드가 동시에 세도 안전한 카운터</td>
+</tr>
+<tr>
+<td><code>issue: (Long, Long) -&gt; IssuedCoupon</code></td>
+<td>함수 타입 파라미터. 방식만 바꿔 같은 조건으로 비교</td>
+</tr>
+</tbody>
+</table></div>
+<p>단언은 <strong>불변식</strong>으로 합니다. &quot;정확히 몇 ms 안에&quot;가 아니라 &quot;발급 수 = 수량 컬럼 = 쿠폰 행 수 = 100, 실패는 전부 소진&quot; 입니다.</p>
+<figure class="code-block"><figcaption><span class="code-lang">Kotlin</span><button type="button" class="copy-button" aria-label="코드 복사">복사</button></figcaption><div class="highlight"><pre><span></span><code><span class="kd">private</span><span class="w"> </span><span class="kd">fun</span><span class="w"> </span><span class="nf">assertExactlyTotalIssued</span><span class="p">(</span><span class="n">result</span><span class="p">:</span><span class="w"> </span><span class="n">IssueResult</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">assertEquals</span><span class="p">(</span><span class="n">TOTAL_QUANTITY</span><span class="p">,</span><span class="w"> </span><span class="n">result</span><span class="p">.</span><span class="na">successCount</span><span class="p">)</span>
+<span class="w">    </span><span class="n">assertEquals</span><span class="p">(</span><span class="n">TOTAL_QUANTITY</span><span class="p">,</span><span class="w"> </span><span class="n">result</span><span class="p">.</span><span class="na">issuedQuantity</span><span class="p">)</span>
+<span class="w">    </span><span class="n">assertEquals</span><span class="p">(</span><span class="n">TOTAL_QUANTITY</span><span class="p">.</span><span class="na">toLong</span><span class="p">(),</span><span class="w"> </span><span class="n">result</span><span class="p">.</span><span class="na">issuedCouponCount</span><span class="p">)</span>
+<span class="w">    </span><span class="c1">// 실패는 전부 "소진" 때문이어야 한다. (데드락·락 타임아웃 같은 예외가 섞이면 안 된다)</span>
+<span class="w">    </span><span class="n">assertEquals</span><span class="p">(</span><span class="n">mapOf</span><span class="p">(</span><span class="s">"COUPON_SOLD_OUT"</span><span class="w"> </span><span class="n">to</span><span class="w"> </span><span class="n">REQUEST_COUNT</span><span class="w"> </span><span class="o">-</span><span class="w"> </span><span class="n">TOTAL_QUANTITY</span><span class="p">),</span><span class="w"> </span><span class="n">result</span><span class="p">.</span><span class="na">failReasons</span><span class="p">)</span>
+</code></pre></div>
+</figure>
+<p>마지막 줄이 중요합니다. 수량만 맞으면 통과시키지 않고, <strong>실패 이유까지</strong> 확인합니다. 데드락이나 락 타임아웃이 섞여도 수량은 맞을 수 있기 때문입니다.</p>
+<p>같은 방식의 도우미가 공용으로도 있습니다. (<a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/test/kotlin/com/site/support/TestSupport.kt" target="_blank" rel="noopener">TestSupport.kt</a> 의 <code>runConcurrently</code>)</p>
+<h2 id="6-비동기-결과-기다리기--awaitility">6. 비동기 결과 기다리기 — Awaitility <a class="header-anchor" href="#6-비동기-결과-기다리기--awaitility">#</a></h2>
+<p>알림은 다른 스레드에서 나갑니다. 발급 직후에 확인하면 아직 안 나갔을 수 있습니다. <code>Thread.sleep(1000)</code> 은 느리고 불안정합니다. <strong>조건이 맞을 때까지 기다립니다.</strong></p>
+<figure class="code-block"><figcaption><span class="code-lang">Kotlin</span><button type="button" class="copy-button" aria-label="코드 복사">복사</button></figcaption><div class="highlight"><pre><span></span><code><span class="c1">// NotificationOutboxTest.kt</span>
+<span class="w">        </span><span class="n">await</span><span class="w"> </span><span class="n">atMost</span><span class="w"> </span><span class="n">Duration</span><span class="p">.</span><span class="na">ofSeconds</span><span class="p">(</span><span class="m">5</span><span class="p">)</span><span class="w"> </span><span class="n">untilAsserted</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="n">assertEquals</span><span class="p">(</span><span class="n">OutboxStatus</span><span class="p">.</span><span class="na">SENT</span><span class="p">,</span><span class="w"> </span><span class="n">outboxRepository</span><span class="p">.</span><span class="na">findAll</span><span class="p">().</span><span class="na">single</span><span class="p">().</span><span class="na">status</span><span class="p">)</span>
+<span class="w">        </span><span class="p">}</span>
+</code></pre></div>
+</figure>
+<p>&quot;일어나지 않아야 하는 것&quot;은 일정 시간 동안 계속 확인합니다.</p>
+<figure class="code-block"><figcaption><span class="code-lang">Kotlin</span><button type="button" class="copy-button" aria-label="코드 복사">복사</button></figcaption><div class="highlight"><pre><span></span><code><span class="n">await</span><span class="p">.</span><span class="na">during</span><span class="p">(</span><span class="n">Duration</span><span class="p">.</span><span class="na">ofSeconds</span><span class="p">(</span><span class="m">1</span><span class="p">)).</span><span class="na">atMost</span><span class="p">(</span><span class="n">Duration</span><span class="p">.</span><span class="na">ofSeconds</span><span class="p">(</span><span class="m">2</span><span class="p">)).</span><span class="na">untilAsserted</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">assertEquals</span><span class="p">(</span><span class="m">0</span><span class="p">,</span><span class="w"> </span><span class="n">fakeAlimtalkSender</span><span class="p">.</span><span class="na">attempts</span><span class="p">.</span><span class="na">get</span><span class="p">())</span>
+<span class="p">}</span>
+</code></pre></div>
+</figure>
+<h2 id="7-api-와-sse-테스트--mockmvc">7. API 와 SSE 테스트 — MockMvc <a class="header-anchor" href="#7-api-와-sse-테스트--mockmvc">#</a></h2>
+<p><a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/test/kotlin/com/site/presentation/CouponQueueApiTest.kt#L99-L118" target="_blank" rel="noopener">CouponQueueApiTest.kt</a></p>
+<figure class="code-block"><figcaption><span class="code-lang">Kotlin</span><button type="button" class="copy-button" aria-label="코드 복사">복사</button></figcaption><div class="highlight"><pre><span></span><code><span class="nd">@Test</span>
+<span class="kd">fun</span><span class="w"> </span><span class="err">`</span><span class="nf">SSE</span><span class="w"> </span><span class="err">로</span><span class="w"> </span><span class="err">연결하면</span><span class="w"> </span><span class="err">지금</span><span class="w"> </span><span class="err">상태를</span><span class="w"> </span><span class="err">보내고</span><span class="p">,</span><span class="w"> </span><span class="err">워커가</span><span class="w"> </span><span class="err">발급하면</span><span class="w"> </span><span class="err">결과를</span><span class="w"> </span><span class="err">보낸</span><span class="w"> </span><span class="err">뒤</span><span class="w"> </span><span class="err">연결을</span><span class="w"> </span><span class="err">닫는다`</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kd">val</span><span class="w"> </span><span class="nv">couponEventId</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">couponEventRepository</span><span class="p">.</span><span class="na">save</span><span class="p">(</span><span class="n">couponEventFixture</span><span class="p">(</span><span class="n">issueMode</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">CouponIssueMode</span><span class="p">.</span><span class="na">QUEUE</span><span class="p">)).</span><span class="na">id</span>
+<span class="w">    </span><span class="n">mockMvc</span><span class="p">.</span><span class="na">post</span><span class="p">(</span><span class="s">"/api/coupon-events/</span><span class="si">$</span><span class="n">couponEventId</span><span class="s">/queue"</span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">header</span><span class="p">(</span><span class="n">HttpHeaders</span><span class="p">.</span><span class="na">AUTHORIZATION</span><span class="p">,</span><span class="w"> </span><span class="s">"Bearer </span><span class="si">$</span><span class="n">token</span><span class="s">"</span><span class="p">)</span><span class="w"> </span><span class="p">}</span>
+
+<span class="w">    </span><span class="kd">val</span><span class="w"> </span><span class="nv">stream</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">mockMvc</span><span class="p">.</span><span class="na">get</span><span class="p">(</span><span class="s">"/api/coupon-events/</span><span class="si">$</span><span class="n">couponEventId</span><span class="s">/queue/me/stream"</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">header</span><span class="p">(</span><span class="n">HttpHeaders</span><span class="p">.</span><span class="na">AUTHORIZATION</span><span class="p">,</span><span class="w"> </span><span class="s">"Bearer </span><span class="si">$</span><span class="n">token</span><span class="s">"</span><span class="p">)</span>
+<span class="w">        </span><span class="n">accept</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">MediaType</span><span class="p">.</span><span class="na">TEXT_EVENT_STREAM</span>
+<span class="w">    </span><span class="p">}.</span><span class="na">andExpect</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">request</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">asyncStarted</span><span class="p">()</span><span class="w"> </span><span class="p">}</span><span class="w"> </span><span class="p">}.</span><span class="na">andReturn</span><span class="p">()</span>
+<span class="w">    </span><span class="n">assertTrue</span><span class="p">(</span><span class="n">stream</span><span class="p">.</span><span class="na">response</span><span class="p">.</span><span class="na">contentAsString</span><span class="p">.</span><span class="na">contains</span><span class="p">(</span><span class="s">"\"state\":\"WAITING\""</span><span class="p">))</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">stream</span><span class="p">.</span><span class="na">response</span><span class="p">.</span><span class="na">contentAsString</span><span class="w"> </span><span class="p">}</span>
+
+<span class="w">    </span><span class="n">couponQueueWorker</span><span class="p">.</span><span class="na">processAll</span><span class="p">()</span>
+<span class="w">    </span><span class="n">queueStreams</span><span class="p">.</span><span class="na">pushAll</span><span class="p">()</span><span class="w"> </span><span class="c1">// 스케줄러 대신 직접 부른다</span>
+
+<span class="w">    </span><span class="n">mockMvc</span><span class="p">.</span><span class="na">perform</span><span class="p">(</span><span class="n">asyncDispatch</span><span class="p">(</span><span class="n">stream</span><span class="p">)).</span><span class="na">andExpect</span><span class="p">(</span><span class="n">status</span><span class="p">().</span><span class="na">isOk</span><span class="p">)</span>
+<span class="w">    </span><span class="kd">val</span><span class="w"> </span><span class="nv">events</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">stream</span><span class="p">.</span><span class="na">response</span><span class="p">.</span><span class="na">contentAsString</span>
+<span class="w">    </span><span class="n">assertTrue</span><span class="p">(</span><span class="n">events</span><span class="p">.</span><span class="na">contains</span><span class="p">(</span><span class="s">"event:status"</span><span class="p">))</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">events</span><span class="w"> </span><span class="p">}</span>
+<span class="w">    </span><span class="n">assertTrue</span><span class="p">(</span><span class="n">events</span><span class="p">.</span><span class="na">contains</span><span class="p">(</span><span class="s">"\"state\":\"DONE\""</span><span class="p">)</span><span class="w"> </span><span class="o">&amp;&amp;</span><span class="w"> </span><span class="n">events</span><span class="p">.</span><span class="na">contains</span><span class="p">(</span><span class="s">"\"result\":\"ISSUED\""</span><span class="p">))</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">events</span><span class="w"> </span><span class="p">}</span>
+<span class="w">    </span><span class="n">assertEquals</span><span class="p">(</span><span class="m">0</span><span class="p">,</span><span class="w"> </span><span class="n">queueStreams</span><span class="p">.</span><span class="na">connectionCount</span><span class="p">())</span>
+<span class="p">}</span>
+</code></pre></div>
+</figure>
+<ul>
+<li><code>mockMvc.post(...) { ... }</code>, <code>andExpect { status { isOk() } }</code> 는 Spring 의 MockMvc Kotlin DSL 입니다.</li>
+<li>실제 서버를 띄우지 않고 디스패처를 직접 부르므로 빠릅니다. 대신 비동기 응답은 <code>asyncDispatch</code> 로 마무리를 직접 시킵니다.</li>
+<li>MockMvc 는 실제 서블릿 컨테이너가 아니라서, 연결 유지·종료 같은 동작은 실제 서버에서 한 번 더 보는 것이 안전합니다. SSE 를 추가할 때(PR #42) 실제 Tomcat 에서도 확인했습니다. 3,000명 뒤에 선 회원이 연결 하나로 순번 2,901 → … → 1 을 받은 뒤 <code>DONE</code> 을 받았습니다.</li>
+</ul>
+<h2 id="8-그-밖의-안전망">8. 그 밖의 안전망 <a class="header-anchor" href="#8-그-밖의-안전망">#</a></h2>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>테스트</th>
+<th>무엇을 지키나</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/test/kotlin/com/site/architecture/LayerDependencyTest.kt" target="_blank" rel="noopener">LayerDependencyTest</a></td>
+<td>계층 의존 방향 (<a href="03-architecture.html">3장</a>)</td>
+</tr>
+<tr>
+<td><a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/test/kotlin/com/site/independent/config/ServiceTimeZoneTest.kt" target="_blank" rel="noopener">ServiceTimeZoneTest</a></td>
+<td>테스트 JVM 은 UTC, 서비스 Clock 은 Asia/Seoul</td>
+</tr>
+<tr>
+<td><a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/test/kotlin/com/site/independent/config/ProdEnvironmentValidatorTest.kt" target="_blank" rel="noopener">ProdEnvironmentValidatorTest</a></td>
+<td>운영 환경변수 누락 시 기동 실패</td>
+</tr>
+<tr>
+<td><a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/test/kotlin/com/site/domain/coupon/ObservabilityTest.kt" target="_blank" rel="noopener">ObservabilityTest</a></td>
+<td>지표가 Prometheus 경로로 나간다 (<a href="11-observability-and-load-test.html">11장</a>)</td>
+</tr>
+<tr>
+<td>Flyway + <code>ddl-auto=validate</code></td>
+<td>엔티티와 마이그레이션이 어긋나면 컨텍스트 기동 실패</td>
+</tr>
+</tbody>
+</table></div>
+<p>CI(<a href="https://github.com/RosieOh/Kopring_Core/blob/main/.github/workflows/ci.yml" target="_blank" rel="noopener">.github/workflows/ci.yml</a>)가 모든 PR 에서 <code>ktlintCheck</code> 와 <code>test</code> 를 돌립니다. GitHub Actions 러너의 Docker 로 Testcontainers 가 돌아갑니다.</p>
+<h2 id="흔한-실수">흔한 실수 <a class="header-anchor" href="#흔한-실수">#</a></h2>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>실수</th>
+<th>결과</th>
+<th>대신</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>테스트에서 <code>LocalDateTime.now()</code></td>
+<td>테스트 JVM(UTC)과 서비스 시간대가 달라 9시간 어긋난다</td>
+<td><code>serviceNow()</code> (TestSupport) 또는 고정 시각</td>
+</tr>
+<tr>
+<td>통합 테스트마다 다른 애너테이션 조합</td>
+<td>컨텍스트를 여러 번 띄워 느려진다</td>
+<td>메타 애너테이션</td>
+</tr>
+<tr>
+<td>스케줄러를 켜 둔다</td>
+<td>결과가 실행마다 달라진다</td>
+<td>끄고 직접 호출</td>
+</tr>
+<tr>
+<td><code>Thread.sleep</code> 으로 비동기 대기</td>
+<td>느리고 가끔 실패한다</td>
+<td>Awaitility</td>
+</tr>
+<tr>
+<td>동시성 테스트를 스레드만 많이 띄워서</td>
+<td>실제로는 겹치지 않는다</td>
+<td><code>CountDownLatch</code> 로 동시 출발</td>
+</tr>
+<tr>
+<td>동시성 테스트에서 수량만 확인</td>
+<td>데드락·타임아웃이 섞여도 통과</td>
+<td>실패 이유까지 확인</td>
+</tr>
+<tr>
+<td>H2 로 동시성 테스트</td>
+<td>운영(MySQL)과 잠금 동작이 다르다</td>
+<td>Testcontainers</td>
+</tr>
+</tbody>
+</table></div>
+<h2 id="직접-해보기">직접 해보기 <a class="header-anchor" href="#직접-해보기">#</a></h2>
+<ol>
+<li><code>CouponEventTest</code> 에 &quot;정확히 종료 시각에 발급하면 COUPON_EVENT_ENDED&quot; 를 <code>withData</code> 로 경계값 세 개(종료 1초 전, 종료 시각, 종료 1초 후)를 묶어 써 보세요.</li>
+<li><code>ProjectConfig</code> 의 <code>isolationMode</code> 를 지우면(기본값 <code>SingleInstance</code>) <code>CouponEventTest</code> 의 &quot;2장짜리 진행 중 이벤트&quot; 블록은 어떻게 되나요? 왜 그런가요?</li>
+<li><code>CouponIssueConcurrencyTest</code> 에서 <code>startSignal</code> 을 없애면(각 스레드가 바로 시작) &quot;락 없음&quot; 테스트는 여전히 정합성이 깨질까요? 몇 번 돌려 보세요.</li>
+</ol>
+<p>다음 장: <a href="11-observability-and-load-test.html">11장. 관측과 부하 테스트</a></p>
+
+</article>
+<p class="source-link"><a href="https://github.com/RosieOh/Kopring_Core/blob/main/docs/10-testing.md" target="_blank" rel="noopener">이 장의 원본 Markdown 보기</a></p>
+<nav class="pager" aria-label="장 이동"><a class="pager-prev" href="09-redis-queue.html"><span>이전</span>9장. Redis 대기열</a><a class="pager-next" href="11-observability-and-load-test.html"><span>다음</span>11장. 관측과 부하 테스트</a></nav>
+</main>
+<nav class="page-toc" aria-label="이 장의 목차"><p class="page-toc-title">이 장에서</p><ol><li class="toc-level-2"><a href="#1-두-종류의-테스트">1. 두 종류의 테스트</a></li>
+<li class="toc-level-2"><a href="#2-kotest--테스트를-문장처럼">2. Kotest — 테스트를 문장처럼</a></li>
+<li class="toc-level-3"><a href="#behaviorspec--given--when--then">BehaviorSpec — Given / When / Then</a></li>
+<li class="toc-level-3"><a href="#funspec--withdata--표로-쓰는-테스트">FunSpec + withData — 표로 쓰는 테스트</a></li>
+<li class="toc-level-3"><a href="#격리--테스트마다-새-인스턴스">격리 — 테스트마다 새 인스턴스</a></li>
+<li class="toc-level-2"><a href="#3-mockk--가짜-의존성">3. MockK — 가짜 의존성</a></li>
+<li class="toc-level-3"><a href="#확장-함수는-모킹하기-번거롭다">확장 함수는 모킹하기 번거롭다</a></li>
+<li class="toc-level-2"><a href="#4-통합-테스트--운영과-같은-db-로">4. 통합 테스트 — 운영과 같은 DB 로</a></li>
+<li class="toc-level-3"><a href="#testcontainers">Testcontainers</a></li>
+<li class="toc-level-3"><a href="#메타-애너테이션-하나로">메타 애너테이션 하나로</a></li>
+<li class="toc-level-3"><a href="#스케줄러는-끄고-직접-부른다">스케줄러는 끄고 직접 부른다</a></li>
+<li class="toc-level-3"><a href="#테스트끼리-섞이지-않게">테스트끼리 섞이지 않게</a></li>
+<li class="toc-level-2"><a href="#5-동시성-테스트--한-번에-출발시키기">5. 동시성 테스트 — 한 번에 출발시키기</a></li>
+<li class="toc-level-2"><a href="#6-비동기-결과-기다리기--awaitility">6. 비동기 결과 기다리기 — Awaitility</a></li>
+<li class="toc-level-2"><a href="#7-api-와-sse-테스트--mockmvc">7. API 와 SSE 테스트 — MockMvc</a></li>
+<li class="toc-level-2"><a href="#8-그-밖의-안전망">8. 그 밖의 안전망</a></li>
+<li class="toc-level-2"><a href="#흔한-실수">흔한 실수</a></li>
+<li class="toc-level-2"><a href="#직접-해보기">직접 해보기</a></li></ol></nav>
+</div>
+</body>
+</html>

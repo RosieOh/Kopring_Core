@@ -1,0 +1,577 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>6장. 인증 — 코프링 교재</title>
+<meta name="description" content="선착순 쿠폰 코드로 배우는 Kotlin + Spring Boot">
+<script>try{var t=localStorage.getItem("book-theme");if(t)document.documentElement.dataset.theme=t;}catch(e){}</script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+<link rel="stylesheet" href="assets/book.css">
+<link rel="stylesheet" href="assets/highlight.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11.4.1/dist/mermaid.min.js" defer></script>
+<script src="assets/book.js" defer></script>
+</head>
+<body>
+<a class="skip-link" href="#content">본문으로 건너뛰기</a>
+<header class="topbar">
+  <button type="button" class="menu-button" aria-label="장 목록 열기" aria-expanded="false" aria-controls="sidebar">목차</button>
+  <a class="topbar-title" href="index.html">코프링 교재</a>
+  <button type="button" class="theme-button" aria-label="밝은 화면과 어두운 화면 바꾸기">화면</button>
+</header>
+<div class="layout">
+<aside class="sidebar" id="sidebar">
+  <a class="sidebar-title" href="index.html">코프링 교재<small>선착순 쿠폰으로 배우는 Kotlin + Spring Boot</small></a>
+  <nav aria-label="장 목록"><ol class="chapter-list">
+<li><a href="index.html">처음에 — 읽는 법과 목차</a></li>
+<li><a href="01-kotlin-basics.html">1장. Kotlin 기초</a></li>
+<li><a href="02-spring-meets-kotlin.html">2장. 스프링이 Kotlin 을 만나면</a></li>
+<li><a href="03-architecture.html">3장. 프로젝트 구조와 계층</a></li>
+<li><a href="04-jpa-with-kotlin.html">4장. JPA 엔티티를 Kotlin 으로</a></li>
+<li><a href="05-web-and-errors.html">5장. 웹 계층과 예외 처리</a></li>
+<li><a href="06-auth.html" aria-current="page">6장. 인증</a></li>
+<li><a href="07-concurrency.html">7장. 동시성 제어</a></li>
+<li><a href="08-async-and-reliability.html">8장. 비동기와 신뢰성</a></li>
+<li><a href="09-redis-queue.html">9장. Redis 대기열</a></li>
+<li><a href="10-testing.html">10장. 테스트</a></li>
+<li><a href="11-observability-and-load-test.html">11장. 관측과 부하 테스트</a></li>
+<li><a href="12-next-steps-and-exercises.html">12장. 다음 공부와 연습 문제</a></li>
+<li><a href="13-virtual-threads-and-backpressure.html">13장. 심화: 가상 스레드와 몰림 대응</a></li>
+  </ol></nav>
+</aside>
+<main id="content" class="content">
+<article class="markdown">
+<h1 id="6장-인증--jwt-refresh-token-rotation-블랙리스트">6장. 인증 — JWT, Refresh Token Rotation, 블랙리스트 <a class="header-anchor" href="#6장-인증--jwt-refresh-token-rotation-블랙리스트">#</a></h1>
+<p><strong>한 줄 요약</strong>: 짧게 사는 access token(JWT)으로 요청마다 인증하고, 길게 사는 refresh token 은 쓸 때마다 새것으로 바꿉니다. 이미 쓴 refresh token 이 다시 오면 탈취로 보고 그 로그인 전체를 끊습니다.</p>
+<h2 id="1-큰-그림">1. 큰 그림 <a class="header-anchor" href="#1-큰-그림">#</a></h2>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>토큰</th>
+<th>형식</th>
+<th>수명</th>
+<th>저장 위치</th>
+<th>하는 일</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>access token</td>
+<td>JWT (서명된 JSON)</td>
+<td>30분</td>
+<td>서버에 저장 안 함</td>
+<td>요청마다 <code>Authorization: Bearer ...</code></td>
+</tr>
+<tr>
+<td>refresh token</td>
+<td>무작위 문자열</td>
+<td>14일</td>
+<td>Redis (해시로)</td>
+<td>access token 이 만료되면 새 쌍을 받는다</td>
+</tr>
+</tbody>
+</table></div>
+<figure class="diagram"><pre class="mermaid" data-source="sequenceDiagram
+    participant U as 클라이언트
+    participant A as AuthService
+    participant R as Redis
+    U-&gt;&gt;A: 로그인 (이메일, 비밀번호)
+    A-&gt;&gt;R: refresh token 저장 (familyId 새로 발급)
+    A--&gt;&gt;U: access + refresh
+    U-&gt;&gt;A: 재발급 (refresh)
+    A-&gt;&gt;R: 꺼내면서 &quot;사용됨&quot; 표시 (Lua)
+    A-&gt;&gt;R: 새 refresh 저장 (같은 familyId)
+    A--&gt;&gt;U: 새 access + 새 refresh
+    U-&gt;&gt;A: 로그아웃 (access 의 jti, refresh)
+    A-&gt;&gt;R: access 를 블랙리스트에, family 폐기
+">sequenceDiagram
+    participant U as 클라이언트
+    participant A as AuthService
+    participant R as Redis
+    U-&gt;&gt;A: 로그인 (이메일, 비밀번호)
+    A-&gt;&gt;R: refresh token 저장 (familyId 새로 발급)
+    A--&gt;&gt;U: access + refresh
+    U-&gt;&gt;A: 재발급 (refresh)
+    A-&gt;&gt;R: 꺼내면서 &quot;사용됨&quot; 표시 (Lua)
+    A-&gt;&gt;R: 새 refresh 저장 (같은 familyId)
+    A--&gt;&gt;U: 새 access + 새 refresh
+    U-&gt;&gt;A: 로그아웃 (access 의 jti, refresh)
+    A-&gt;&gt;R: access 를 블랙리스트에, family 폐기
+</pre></figure>
+<p>access token 은 서버에 저장하지 않으니 검증이 빠릅니다(서명과 만료만 확인). 대신 <strong>한 번 발급하면 만료 전에 무를 수 없습니다.</strong> 로그아웃을 위해 블랙리스트를 둡니다.</p>
+<h2 id="2-spring-security-설정--kotlin-dsl">2. Spring Security 설정 — Kotlin DSL <a class="header-anchor" href="#2-spring-security-설정--kotlin-dsl">#</a></h2>
+<p><a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/main/kotlin/com/site/infrastructure/security/SecurityConfig.kt#L31-L70" target="_blank" rel="noopener">SecurityConfig.kt</a></p>
+<figure class="code-block"><figcaption><span class="code-lang">Kotlin</span><button type="button" class="copy-button" aria-label="코드 복사">복사</button></figcaption><div class="highlight"><pre><span></span><code><span class="cm">/**</span>
+<span class="cm"> * Spring Security Kotlin DSL.</span>
+<span class="cm"> * `http { ... }` 는 import org.springframework.security.config.annotation.web.invoke 로 들어오는</span>
+<span class="cm"> * 확장 함수(operator fun HttpSecurity.invoke)다. 이 import 가 빠지면 컴파일 에러가 난다.</span>
+<span class="cm"> */</span>
+<span class="nd">@Bean</span>
+<span class="kd">fun</span><span class="w"> </span><span class="nf">securityFilterChain</span><span class="p">(</span><span class="n">http</span><span class="p">:</span><span class="w"> </span><span class="n">HttpSecurity</span><span class="p">):</span><span class="w"> </span><span class="n">SecurityFilterChain</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">http</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">csrf</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">disable</span><span class="p">()</span><span class="w"> </span><span class="p">}</span>
+<span class="w">        </span><span class="n">httpBasic</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">disable</span><span class="p">()</span><span class="w"> </span><span class="p">}</span>
+<span class="w">        </span><span class="n">formLogin</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">disable</span><span class="p">()</span><span class="w"> </span><span class="p">}</span>
+<span class="w">        </span><span class="n">sessionManagement</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="n">sessionCreationPolicy</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">SessionCreationPolicy</span><span class="p">.</span><span class="na">STATELESS</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="w">        </span><span class="n">authorizeHttpRequests</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="c1">// SSE 같은 비동기 응답이 끝날 때 한 번 더 일어나는 ASYNC 디스패치. 처음 요청(REQUEST)에서 이미 인가를 통과했다.</span>
+<span class="w">            </span><span class="c1">// 막으면 이미 보내기 시작한 응답에 인가 실패가 겹쳐 "response is already committed" 오류가 난다.</span>
+<span class="w">            </span><span class="n">authorize</span><span class="p">(</span><span class="n">DispatcherTypeRequestMatcher</span><span class="p">(</span><span class="n">DispatcherType</span><span class="p">.</span><span class="na">ASYNC</span><span class="p">),</span><span class="w"> </span><span class="n">permitAll</span><span class="p">)</span>
+<span class="w">            </span><span class="n">authorize</span><span class="p">(</span><span class="n">HttpMethod</span><span class="p">.</span><span class="na">POST</span><span class="p">,</span><span class="w"> </span><span class="s">"/api/members"</span><span class="p">,</span><span class="w"> </span><span class="n">permitAll</span><span class="p">)</span>
+<span class="w">            </span><span class="n">authorize</span><span class="p">(</span><span class="n">HttpMethod</span><span class="p">.</span><span class="na">POST</span><span class="p">,</span><span class="w"> </span><span class="s">"/api/auth/login"</span><span class="p">,</span><span class="w"> </span><span class="n">permitAll</span><span class="p">)</span>
+<span class="w">            </span><span class="n">authorize</span><span class="p">(</span><span class="n">HttpMethod</span><span class="p">.</span><span class="na">POST</span><span class="p">,</span><span class="w"> </span><span class="s">"/api/auth/reissue"</span><span class="p">,</span><span class="w"> </span><span class="n">permitAll</span><span class="p">)</span>
+<span class="w">            </span><span class="n">authorize</span><span class="p">(</span><span class="s">"/swagger-ui/**"</span><span class="p">,</span><span class="w"> </span><span class="n">permitAll</span><span class="p">)</span>
+<span class="w">            </span><span class="n">authorize</span><span class="p">(</span><span class="s">"/v3/api-docs/**"</span><span class="p">,</span><span class="w"> </span><span class="n">permitAll</span><span class="p">)</span>
+<span class="w">            </span><span class="n">authorize</span><span class="p">(</span><span class="s">"/actuator/health"</span><span class="p">,</span><span class="w"> </span><span class="n">permitAll</span><span class="p">)</span>
+<span class="w">            </span><span class="c1">// Prometheus 수집용. 운영 프로필은 health 만 노출해서 이 경로 자체가 없다 (운영에서 노출하려면 관리 포트를 분리한다)</span>
+<span class="w">            </span><span class="n">authorize</span><span class="p">(</span><span class="s">"/actuator/prometheus"</span><span class="p">,</span><span class="w"> </span><span class="n">permitAll</span><span class="p">)</span>
+<span class="w">            </span><span class="n">authorize</span><span class="p">(</span><span class="s">"/error"</span><span class="p">,</span><span class="w"> </span><span class="n">permitAll</span><span class="p">)</span>
+<span class="w">            </span><span class="n">authorize</span><span class="p">(</span><span class="s">"/api/admin/**"</span><span class="p">,</span><span class="w"> </span><span class="n">hasRole</span><span class="p">(</span><span class="s">"ADMIN"</span><span class="p">))</span>
+<span class="w">            </span><span class="n">authorize</span><span class="p">(</span><span class="n">anyRequest</span><span class="p">,</span><span class="w"> </span><span class="n">authenticated</span><span class="p">)</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="w">        </span><span class="n">exceptionHandling</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="n">authenticationEntryPoint</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">jwtAuthenticationEntryPoint</span>
+<span class="w">            </span><span class="n">accessDeniedHandler</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">jwtAccessDeniedHandler</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="w">        </span><span class="n">addFilterBefore</span><span class="o">&lt;</span><span class="n">UsernamePasswordAuthenticationFilter</span><span class="o">&gt;</span><span class="p">(</span>
+<span class="w">            </span><span class="n">JwtAuthenticationFilter</span><span class="p">(</span><span class="n">jwtTokenProvider</span><span class="p">,</span><span class="w"> </span><span class="n">accessTokenBlacklist</span><span class="p">),</span>
+<span class="w">        </span><span class="p">)</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="n">http</span><span class="p">.</span><span class="na">build</span><span class="p">()</span>
+<span class="p">}</span>
+</code></pre></div>
+</figure>
+<p>Java 의 <code>http.csrf(c -&gt; c.disable()).sessionManagement(...)</code> 사슬을 Kotlin 의 블록 문법으로 쓴 것입니다. 1장에서 본 <strong>확장 함수 + 람다</strong>가 합쳐진 DSL(작은 전용 언어)입니다. <code>addFilterBefore&lt;UsernamePasswordAuthenticationFilter&gt;(...)</code> 처럼 타입을 꺾쇠로 넘기는 것도 Kotlin 전용 문법입니다.</p>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>설정</th>
+<th>왜</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>csrf { disable() }</code></td>
+<td>쿠키 세션을 쓰지 않고 헤더 토큰만 쓰므로 CSRF 공격 대상이 아니다</td>
+</tr>
+<tr>
+<td><code>STATELESS</code></td>
+<td>서버가 세션을 만들지 않는다. 인증 정보는 매 요청의 토큰에서 온다</td>
+</tr>
+<tr>
+<td><code>authorize</code> 순서</td>
+<td>위에서부터 처음 맞는 규칙이 적용된다. <code>anyRequest</code> 는 맨 끝</td>
+</tr>
+<tr>
+<td><code>hasRole(&quot;ADMIN&quot;)</code></td>
+<td>권한 이름 <code>ROLE_ADMIN</code> 을 가진 사용자만</td>
+</tr>
+<tr>
+<td><code>DispatcherType.ASYNC</code> 허용</td>
+<td>SSE 응답이 끝날 때의 내부 재디스패치. <a href="09-redis-queue.html">9장</a>의 SSE 를 붙이며 추가했다</td>
+</tr>
+</tbody>
+</table></div>
+<h2 id="3-요청마다--jwtauthenticationfilter">3. 요청마다 — <code>JwtAuthenticationFilter</code> <a class="header-anchor" href="#3-요청마다--jwtauthenticationfilter">#</a></h2>
+<p><a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/main/kotlin/com/site/infrastructure/security/jwt/JwtAuthenticationFilter.kt#L15-L51" target="_blank" rel="noopener">JwtAuthenticationFilter.kt</a></p>
+<figure class="code-block"><figcaption><span class="code-lang">Kotlin</span><button type="button" class="copy-button" aria-label="코드 복사">복사</button></figcaption><div class="highlight"><pre><span></span><code><span class="cm">/**</span>
+<span class="cm"> * 토큰이 유효하면 SecurityContext 에 인증 정보를 넣고, 아니면 에러 코드만 request 에 남긴 채 통과시킨다.</span>
+<span class="cm"> * 실제 401 응답은 인증이 필요한 경로에서 JwtAuthenticationEntryPoint 가 만든다.</span>
+<span class="cm"> *</span>
+<span class="cm"> * @Component 로 등록하지 않는다. 빈으로 등록하면 Spring Boot 가 서블릿 필터로도 자동 등록해서</span>
+<span class="cm"> * Security 필터 체인 밖에서 한 번 더 실행된다.</span>
+<span class="cm"> */</span>
+<span class="kd">class</span><span class="w"> </span><span class="nc">JwtAuthenticationFilter</span><span class="p">(</span>
+<span class="w">    </span><span class="kd">private</span><span class="w"> </span><span class="kd">val</span><span class="w"> </span><span class="nv">jwtTokenProvider</span><span class="p">:</span><span class="w"> </span><span class="n">JwtTokenProvider</span><span class="p">,</span>
+<span class="w">    </span><span class="kd">private</span><span class="w"> </span><span class="kd">val</span><span class="w"> </span><span class="nv">accessTokenBlacklist</span><span class="p">:</span><span class="w"> </span><span class="n">AccessTokenBlacklist</span><span class="p">,</span>
+<span class="p">)</span><span class="w"> </span><span class="p">:</span><span class="w"> </span><span class="n">OncePerRequestFilter</span><span class="p">()</span><span class="w"> </span><span class="p">{</span>
+
+<span class="w">    </span><span class="kd">override</span><span class="w"> </span><span class="kd">fun</span><span class="w"> </span><span class="nf">doFilterInternal</span><span class="p">(</span>
+<span class="w">        </span><span class="n">request</span><span class="p">:</span><span class="w"> </span><span class="n">HttpServletRequest</span><span class="p">,</span>
+<span class="w">        </span><span class="n">response</span><span class="p">:</span><span class="w"> </span><span class="n">HttpServletResponse</span><span class="p">,</span>
+<span class="w">        </span><span class="n">filterChain</span><span class="p">:</span><span class="w"> </span><span class="n">FilterChain</span><span class="p">,</span>
+<span class="w">    </span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">resolveToken</span><span class="p">(</span><span class="n">request</span><span class="p">)</span><span class="o">?.</span><span class="na">let</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">token</span><span class="w"> </span><span class="o">-&gt;</span>
+<span class="w">            </span><span class="k">try</span><span class="w"> </span><span class="p">{</span>
+<span class="w">                </span><span class="kd">val</span><span class="w"> </span><span class="nv">authMember</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">authenticate</span><span class="p">(</span><span class="n">token</span><span class="p">)</span>
+<span class="w">                </span><span class="n">SecurityContextHolder</span><span class="p">.</span><span class="na">getContext</span><span class="p">().</span><span class="na">authentication</span><span class="w"> </span><span class="o">=</span>
+<span class="w">                    </span><span class="n">UsernamePasswordAuthenticationToken</span><span class="p">(</span><span class="n">authMember</span><span class="p">,</span><span class="w"> </span><span class="kc">null</span><span class="p">,</span><span class="w"> </span><span class="n">authMember</span><span class="p">.</span><span class="na">authorities</span><span class="p">)</span>
+<span class="w">            </span><span class="p">}</span><span class="w"> </span><span class="k">catch</span><span class="w"> </span><span class="p">(</span><span class="n">e</span><span class="p">:</span><span class="w"> </span><span class="n">ServiceException</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">                </span><span class="n">request</span><span class="p">.</span><span class="na">setAttribute</span><span class="p">(</span><span class="n">JWT_ERROR_ATTRIBUTE</span><span class="p">,</span><span class="w"> </span><span class="n">e</span><span class="p">.</span><span class="na">errorCode</span><span class="p">)</span>
+<span class="w">            </span><span class="p">}</span>
+<span class="w">        </span><span class="p">}</span>
+
+<span class="w">        </span><span class="n">filterChain</span><span class="p">.</span><span class="na">doFilter</span><span class="p">(</span><span class="n">request</span><span class="p">,</span><span class="w"> </span><span class="n">response</span><span class="p">)</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="kd">private</span><span class="w"> </span><span class="kd">fun</span><span class="w"> </span><span class="nf">authenticate</span><span class="p">(</span><span class="n">token</span><span class="p">:</span><span class="w"> </span><span class="kt">String</span><span class="p">):</span><span class="w"> </span><span class="n">AuthMember</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="kd">val</span><span class="w"> </span><span class="nv">authMember</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">jwtTokenProvider</span><span class="p">.</span><span class="na">parseAccessToken</span><span class="p">(</span><span class="n">token</span><span class="p">)</span>
+<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">accessTokenBlacklist</span><span class="p">.</span><span class="na">contains</span><span class="p">(</span><span class="n">authMember</span><span class="p">.</span><span class="na">tokenId</span><span class="p">))</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="k">throw</span><span class="w"> </span><span class="n">ServiceException</span><span class="p">(</span><span class="n">ErrorCode</span><span class="p">.</span><span class="na">LOGGED_OUT_TOKEN</span><span class="p">)</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="w">        </span><span class="k">return</span><span class="w"> </span><span class="n">authMember</span>
+<span class="w">    </span><span class="p">}</span>
+</code></pre></div>
+</figure>
+<p>필터는 <strong>거절하지 않고 기록만 합니다.</strong> 토큰이 없거나 잘못돼도 다음으로 넘깁니다. 왜일까요?</p>
+<ul>
+<li>로그인·회원가입처럼 토큰 없이 와야 하는 경로가 있다. 그 판단은 <code>authorize</code> 규칙이 한다.</li>
+<li>인증이 필요한 경로에서 인증 정보가 없으면, Spring Security 가 <code>JwtAuthenticationEntryPoint</code> 를 부른다. 그때 필터가 남긴 에러 코드(만료? 위조? 로그아웃?)를 꺼내 정확한 이유로 401 을 만든다.</li>
+</ul>
+<p><a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/main/kotlin/com/site/infrastructure/security/handler/JwtAuthenticationEntryPoint.kt" target="_blank" rel="noopener">JwtAuthenticationEntryPoint.kt</a></p>
+<figure class="code-block"><figcaption><span class="code-lang">Kotlin</span><button type="button" class="copy-button" aria-label="코드 복사">복사</button></figcaption><div class="highlight"><pre><span></span><code><span class="c1">// 필터가 남긴 토큰 에러가 있으면 그걸, 없으면 "토큰 자체가 없음"으로 응답</span>
+<span class="kd">val</span><span class="w"> </span><span class="nv">errorCode</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">request</span><span class="p">.</span><span class="na">getAttribute</span><span class="p">(</span><span class="n">JwtAuthenticationFilter</span><span class="p">.</span><span class="na">JWT_ERROR_ATTRIBUTE</span><span class="p">)</span><span class="w"> </span><span class="k">as?</span><span class="w"> </span><span class="n">ErrorCode</span>
+<span class="w">    </span><span class="o">?:</span><span class="w"> </span><span class="n">ErrorCode</span><span class="p">.</span><span class="na">EMPTY_AUTHENTICATION</span>
+</code></pre></div>
+</figure>
+<p><code>as?</code> 는 안전한 형변환입니다. 타입이 맞지 않거나 null 이면 null 을 돌려줍니다.</p>
+<p><code>SecurityContext</code> 에 넣은 <code>AuthMember</code> 가 컨트롤러의 <code>@AuthenticationPrincipal authMember: AuthMember</code> 로 나옵니다.</p>
+<p><a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/main/kotlin/com/site/infrastructure/security/AuthMember.kt#L8-L22" target="_blank" rel="noopener">AuthMember.kt</a></p>
+<figure class="code-block"><figcaption><span class="code-lang">Kotlin</span><button type="button" class="copy-button" aria-label="코드 복사">복사</button></figcaption><div class="highlight"><pre><span></span><code><span class="cm">/**</span>
+<span class="cm"> * SecurityContext 에 담기는 인증 주체.</span>
+<span class="cm"> * 컨트롤러에서 @AuthenticationPrincipal authMember: AuthMember 로 꺼내 쓴다.</span>
+<span class="cm"> *</span>
+<span class="cm"> * tokenId / tokenExpiresAt 은 "어떤 access token 으로 인증됐는지"를 나타낸다. (로그아웃 시 블랙리스트 등록용)</span>
+<span class="cm"> */</span>
+<span class="kd">data</span><span class="w"> </span><span class="kd">class</span><span class="w"> </span><span class="nc">AuthMember</span><span class="p">(</span>
+<span class="w">    </span><span class="kd">val</span><span class="w"> </span><span class="nv">memberId</span><span class="p">:</span><span class="w"> </span><span class="kt">Long</span><span class="p">,</span>
+<span class="w">    </span><span class="kd">val</span><span class="w"> </span><span class="nv">role</span><span class="p">:</span><span class="w"> </span><span class="n">MemberRole</span><span class="p">,</span>
+<span class="w">    </span><span class="kd">val</span><span class="w"> </span><span class="nv">tokenId</span><span class="p">:</span><span class="w"> </span><span class="kt">String</span><span class="p">,</span>
+<span class="w">    </span><span class="kd">val</span><span class="w"> </span><span class="nv">tokenExpiresAt</span><span class="p">:</span><span class="w"> </span><span class="n">Instant</span><span class="p">,</span>
+<span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kd">val</span><span class="w"> </span><span class="nv">authorities</span><span class="p">:</span><span class="w"> </span><span class="n">List</span><span class="o">&lt;</span><span class="n">GrantedAuthority</span><span class="o">&gt;</span>
+<span class="w">        </span><span class="k">get</span><span class="p">()</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">listOf</span><span class="p">(</span><span class="n">SimpleGrantedAuthority</span><span class="p">(</span><span class="n">role</span><span class="p">.</span><span class="na">authority</span><span class="p">))</span>
+<span class="p">}</span>
+</code></pre></div>
+</figure>
+<h2 id="4-토큰-만들기와-읽기--jwttokenprovider">4. 토큰 만들기와 읽기 — <code>JwtTokenProvider</code> <a class="header-anchor" href="#4-토큰-만들기와-읽기--jwttokenprovider">#</a></h2>
+<p><a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/main/kotlin/com/site/infrastructure/security/jwt/JwtTokenProvider.kt#L38-L82" target="_blank" rel="noopener">JwtTokenProvider.kt</a></p>
+<figure class="code-block"><figcaption><span class="code-lang">Kotlin</span><button type="button" class="copy-button" aria-label="코드 복사">복사</button></figcaption><div class="highlight"><pre><span></span><code><span class="kd">override</span><span class="w"> </span><span class="kd">fun</span><span class="w"> </span><span class="nf">createAccessToken</span><span class="p">(</span><span class="n">memberId</span><span class="p">:</span><span class="w"> </span><span class="kt">Long</span><span class="p">,</span><span class="w"> </span><span class="n">role</span><span class="p">:</span><span class="w"> </span><span class="n">MemberRole</span><span class="p">):</span><span class="w"> </span><span class="kt">String</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kd">val</span><span class="w"> </span><span class="nv">now</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Date</span><span class="p">.</span><span class="na">from</span><span class="p">(</span><span class="n">clock</span><span class="p">.</span><span class="na">instant</span><span class="p">())</span>
+<span class="w">    </span><span class="kd">val</span><span class="w"> </span><span class="nv">expiration</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Date</span><span class="p">(</span><span class="n">now</span><span class="p">.</span><span class="na">time</span><span class="w"> </span><span class="o">+</span><span class="w"> </span><span class="n">jwtProperties</span><span class="p">.</span><span class="na">accessTokenExpiration</span><span class="p">.</span><span class="na">toMillis</span><span class="p">())</span>
+
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="n">Jwts</span><span class="p">.</span><span class="na">builder</span><span class="p">()</span>
+<span class="w">        </span><span class="p">.</span><span class="na">id</span><span class="p">(</span><span class="n">UUID</span><span class="p">.</span><span class="na">randomUUID</span><span class="p">().</span><span class="na">toString</span><span class="p">())</span>
+<span class="w">        </span><span class="p">.</span><span class="na">subject</span><span class="p">(</span><span class="n">memberId</span><span class="p">.</span><span class="na">toString</span><span class="p">())</span>
+<span class="w">        </span><span class="p">.</span><span class="na">claim</span><span class="p">(</span><span class="n">ROLE_CLAIM</span><span class="p">,</span><span class="w"> </span><span class="n">role</span><span class="p">.</span><span class="na">name</span><span class="p">)</span>
+<span class="w">        </span><span class="p">.</span><span class="na">issuedAt</span><span class="p">(</span><span class="n">now</span><span class="p">)</span>
+<span class="w">        </span><span class="p">.</span><span class="na">expiration</span><span class="p">(</span><span class="n">expiration</span><span class="p">)</span>
+<span class="w">        </span><span class="p">.</span><span class="na">signWith</span><span class="p">(</span><span class="n">secretKey</span><span class="p">)</span>
+<span class="w">        </span><span class="p">.</span><span class="na">compact</span><span class="p">()</span>
+<span class="p">}</span>
+
+<span class="cm">/**</span>
+<span class="cm"> * refresh token 은 JWT 가 아니라 무작위 문자열이다.</span>
+<span class="cm"> * Redis 에 저장된 값과 대조해야만 의미가 있으므로 토큰 안에 정보를 담을 필요가 없고,</span>
+<span class="cm"> * 탈취되더라도 안에서 읽어낼 정보가 없다.</span>
+<span class="cm"> */</span>
+<span class="kd">override</span><span class="w"> </span><span class="kd">fun</span><span class="w"> </span><span class="nf">createRefreshToken</span><span class="p">():</span><span class="w"> </span><span class="kt">String</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kd">val</span><span class="w"> </span><span class="nv">bytes</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">ByteArray</span><span class="p">(</span><span class="n">REFRESH_TOKEN_BYTES</span><span class="p">).</span><span class="na">also</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">secureRandom</span><span class="p">.</span><span class="na">nextBytes</span><span class="p">(</span><span class="nb">it</span><span class="p">)</span><span class="w"> </span><span class="p">}</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="n">Base64</span><span class="p">.</span><span class="na">getUrlEncoder</span><span class="p">().</span><span class="na">withoutPadding</span><span class="p">().</span><span class="na">encodeToString</span><span class="p">(</span><span class="n">bytes</span><span class="p">)</span>
+<span class="p">}</span>
+
+<span class="kd">fun</span><span class="w"> </span><span class="nf">parseAccessToken</span><span class="p">(</span><span class="n">token</span><span class="p">:</span><span class="w"> </span><span class="kt">String</span><span class="p">):</span><span class="w"> </span><span class="n">AuthMember</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kd">val</span><span class="w"> </span><span class="nv">claims</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">try</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">parser</span><span class="p">.</span><span class="na">parseSignedClaims</span><span class="p">(</span><span class="n">token</span><span class="p">).</span><span class="na">payload</span>
+<span class="w">    </span><span class="p">}</span><span class="w"> </span><span class="k">catch</span><span class="w"> </span><span class="p">(</span><span class="n">e</span><span class="p">:</span><span class="w"> </span><span class="n">JwtException</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="k">throw</span><span class="w"> </span><span class="n">ServiceException</span><span class="p">(</span><span class="n">e</span><span class="p">.</span><span class="na">toErrorCode</span><span class="p">())</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="c1">// 서명이 맞아도 이 서비스가 넣는 클레임이 빠졌거나 형식이 다르면 401 로 거절한다. (클레임 구성이 바뀌기 전의 토큰 등)</span>
+<span class="w">    </span><span class="c1">// 그대로 꺼내면 NPE·NumberFormatException 이 위의 catch 밖으로 새어, ServiceException 만 잡는 필터를 지나 500 이 된다.</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="n">claims</span><span class="p">.</span><span class="na">toAuthMemberOrNull</span><span class="p">()</span><span class="w"> </span><span class="o">?:</span><span class="w"> </span><span class="k">throw</span><span class="w"> </span><span class="n">ServiceException</span><span class="p">(</span><span class="n">ErrorCode</span><span class="p">.</span><span class="na">INVALID_TOKEN</span><span class="p">)</span>
+<span class="p">}</span>
+
+<span class="kd">private</span><span class="w"> </span><span class="kd">fun</span><span class="w"> </span><span class="n">Claims</span><span class="p">.</span><span class="nf">toAuthMemberOrNull</span><span class="p">():</span><span class="w"> </span><span class="n">AuthMember?</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kd">val</span><span class="w"> </span><span class="nv">memberId</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">subject</span><span class="o">?.</span><span class="na">toLongOrNull</span><span class="p">()</span><span class="w"> </span><span class="o">?:</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="kc">null</span>
+<span class="w">    </span><span class="c1">// get(name, String::class.java) 는 타입이 다르면 RequiredTypeException 을 던지므로 as? 로 꺼낸다</span>
+<span class="w">    </span><span class="kd">val</span><span class="w"> </span><span class="nv">roleName</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">this</span><span class="o">[</span><span class="n">ROLE_CLAIM</span><span class="o">]</span><span class="w"> </span><span class="k">as?</span><span class="w"> </span><span class="kt">String</span><span class="w"> </span><span class="o">?:</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="kc">null</span>
+<span class="w">    </span><span class="kd">val</span><span class="w"> </span><span class="nv">role</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">MemberRole</span><span class="p">.</span><span class="na">entries</span><span class="p">.</span><span class="na">firstOrNull</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nb">it</span><span class="p">.</span><span class="na">name</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="n">roleName</span><span class="w"> </span><span class="p">}</span><span class="w"> </span><span class="o">?:</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="kc">null</span>
+<span class="w">    </span><span class="kd">val</span><span class="w"> </span><span class="nv">tokenId</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">id</span><span class="w"> </span><span class="o">?:</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="kc">null</span>
+<span class="w">    </span><span class="kd">val</span><span class="w"> </span><span class="nv">expiresAt</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">expiration</span><span class="w"> </span><span class="o">?:</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="kc">null</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="n">AuthMember</span><span class="p">(</span><span class="n">memberId</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">memberId</span><span class="p">,</span><span class="w"> </span><span class="n">role</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">role</span><span class="p">,</span><span class="w"> </span><span class="n">tokenId</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">tokenId</span><span class="p">,</span><span class="w"> </span><span class="n">tokenExpiresAt</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">expiresAt</span><span class="p">.</span><span class="na">toInstant</span><span class="p">())</span>
+<span class="p">}</span>
+</code></pre></div>
+</figure>
+<ul>
+<li><code>.id(UUID...)</code> 가 토큰마다 고유한 ID(jti)입니다. 로그아웃할 때 이 ID 를 블랙리스트에 올립니다. 토큰 원문 전체를 저장하지 않아도 됩니다.</li>
+<li>회원 ID 와 권한을 토큰 안에 넣어서, 요청마다 DB 에서 회원을 읽지 않습니다.</li>
+<li>JWT 는 <strong>암호화가 아니라 서명</strong>입니다. 내용은 누구나 읽을 수 있고, 위조만 못 합니다. 비밀 정보를 넣지 않습니다.</li>
+<li><strong>서명이 맞아도 클레임은 믿지 않고 꺼냅니다</strong> (<code>toAuthMemberOrNull</code>). 처음에는 <code>MemberRole.valueOf(claims.get(...))</code> 처럼 바로 꺼냈는데, <code>role</code> 이 없는 토큰이면 NPE 가 <code>catch (e: JwtException)</code> 밖에서 터져 401 이 아니라 500 이 났습니다(#64). 인증 경로는 이상한 입력을 모두 같은 응답(401)으로 닫아야 합니다.</li>
+<li>발급 시각과 만료 검증은 서비스 <code>Clock</code> 을 씁니다(#66). jjwt 파서도 기본은 시스템 시각이라 <code>.clock { ... }</code> 으로 같은 시계를 넣었습니다. 그래야 테스트에서 시간을 움직여 &quot;만료 1초 전 통과, 1초 뒤 거절&quot;을 확인할 수 있습니다.</li>
+</ul>
+<h2 id="5-권한--role-로-갈까-관리자-엔티티를-따로-둘까">5. 권한 — Role 로 갈까, 관리자 엔티티를 따로 둘까 <a class="header-anchor" href="#5-권한--role-로-갈까-관리자-엔티티를-따로-둘까">#</a></h2>
+<p>관리자를 표현하는 방법은 두 가지였습니다.</p>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>방식</th>
+<th>장점</th>
+<th>단점</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>회원에 Role 컬럼</strong> (선택)</td>
+<td>로그인·토큰·필터를 그대로 쓴다. <code>hasRole(&quot;ADMIN&quot;)</code> 한 줄</td>
+<td>관리자만의 정보가 많아지면 회원 테이블이 커진다</td>
+</tr>
+<tr>
+<td>관리자 엔티티 분리</td>
+<td>관리자 전용 필드·감사 로그를 따로 둔다</td>
+<td>로그인 경로와 토큰 처리가 두 벌이 된다</td>
+</tr>
+</tbody>
+</table></div>
+<p>이 프로젝트는 관리자 기능이 &quot;이벤트 등록·수정&quot;뿐이라 Role 을 택했습니다.</p>
+<p><a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/main/kotlin/com/site/domain/member/entity/MemberRole.kt" target="_blank" rel="noopener">MemberRole.kt</a></p>
+<figure class="code-block"><figcaption><span class="code-lang">Kotlin</span><button type="button" class="copy-button" aria-label="코드 복사">복사</button></figcaption><div class="highlight"><pre><span></span><code><span class="kd">enum</span><span class="w"> </span><span class="kd">class</span><span class="w"> </span><span class="nc">MemberRole</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">USER</span><span class="p">,</span>
+<span class="w">    </span><span class="n">ADMIN</span><span class="p">,</span>
+<span class="w">    </span><span class="p">;</span>
+
+<span class="w">    </span><span class="kd">val</span><span class="w"> </span><span class="nv">authority</span><span class="p">:</span><span class="w"> </span><span class="kt">String</span>
+<span class="w">        </span><span class="k">get</span><span class="p">()</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">"ROLE_</span><span class="si">$</span><span class="n">name</span><span class="s">"</span>
+<span class="p">}</span>
+</code></pre></div>
+</figure>
+<p>Spring Security 의 <code>hasRole(&quot;ADMIN&quot;)</code> 은 권한 이름 앞에 <code>ROLE_</code> 이 붙어 있기를 기대합니다. 그 규칙을 enum 의 계산 프로퍼티에 한 번만 적었습니다.</p>
+<p>관리자 계정은 로컬에서만 코드로 만듭니다. (<a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/main/kotlin/com/site/infrastructure/database/LocalAdminInitializer.kt" target="_blank" rel="noopener">LocalAdminInitializer.kt</a> 주석: &quot;운영에서는 코드로 관리자를 만들지 않는다. DB 에서 role 을 직접 바꾸거나 관리자 초대 기능을 따로 둔다.&quot;)</p>
+<h2 id="6-로그인--같은-에러-새-토큰-패밀리">6. 로그인 — 같은 에러, 새 토큰 패밀리 <a class="header-anchor" href="#6-로그인--같은-에러-새-토큰-패밀리">#</a></h2>
+<p><a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/main/kotlin/com/site/domain/auth/service/AuthService.kt#L35-L46" target="_blank" rel="noopener">AuthService.kt</a></p>
+<figure class="code-block"><figcaption><span class="code-lang">Kotlin</span><button type="button" class="copy-button" aria-label="코드 복사">복사</button></figcaption><div class="highlight"><pre><span></span><code><span class="cm">/**</span>
+<span class="cm"> * 이메일이 없든 비밀번호가 틀리든 같은 에러를 돌려준다.</span>
+<span class="cm"> * (어느 쪽이 틀렸는지 알려주면 가입된 이메일을 수집하는 데 악용될 수 있다)</span>
+<span class="cm"> */</span>
+<span class="kd">fun</span><span class="w"> </span><span class="nf">login</span><span class="p">(</span><span class="n">email</span><span class="p">:</span><span class="w"> </span><span class="kt">String</span><span class="p">,</span><span class="w"> </span><span class="n">rawPassword</span><span class="p">:</span><span class="w"> </span><span class="kt">String</span><span class="p">):</span><span class="w"> </span><span class="n">TokenPair</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kd">val</span><span class="w"> </span><span class="nv">member</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">memberRepository</span><span class="p">.</span><span class="na">findByEmail</span><span class="p">(</span><span class="n">email</span><span class="p">)</span>
+<span class="w">        </span><span class="o">?.</span><span class="na">takeIf</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">passwordEncoder</span><span class="p">.</span><span class="na">matches</span><span class="p">(</span><span class="n">rawPassword</span><span class="p">,</span><span class="w"> </span><span class="nb">it</span><span class="p">.</span><span class="na">password</span><span class="p">)</span><span class="w"> </span><span class="p">}</span>
+<span class="w">        </span><span class="o">?:</span><span class="w"> </span><span class="k">throw</span><span class="w"> </span><span class="n">ServiceException</span><span class="p">(</span><span class="n">ErrorCode</span><span class="p">.</span><span class="na">INVALID_CREDENTIALS</span><span class="p">)</span>
+
+<span class="w">    </span><span class="c1">// 로그인 한 번 = 새 토큰 패밀리</span>
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="n">issueTokens</span><span class="p">(</span><span class="n">member</span><span class="p">,</span><span class="w"> </span><span class="n">familyId</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">UUID</span><span class="p">.</span><span class="na">randomUUID</span><span class="p">().</span><span class="na">toString</span><span class="p">())</span>
+<span class="p">}</span>
+</code></pre></div>
+</figure>
+<p>비밀번호는 <code>PasswordEncoderFactories.createDelegatingPasswordEncoder()</code> 로 해시합니다. 저장값이 <code>{bcrypt}...</code> 처럼 알고리즘 이름을 달고 있어, 나중에 알고리즘을 바꿔도 기존 비밀번호와 호환됩니다. (<a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/main/kotlin/com/site/infrastructure/security/SecurityConfig.kt" target="_blank" rel="noopener">SecurityConfig.kt</a> 의 <code>passwordEncoder()</code> 주석)</p>
+<h2 id="7-재발급--refresh-token-rotation-과-재사용-감지">7. 재발급 — Refresh Token Rotation 과 재사용 감지 <a class="header-anchor" href="#7-재발급--refresh-token-rotation-과-재사용-감지">#</a></h2>
+<p>refresh token 을 14일 동안 같은 값으로 쓰면, 한 번 훔친 사람이 14일 내내 씁니다. 그래서 <strong>쓸 때마다 새 토큰으로 바꿉니다(rotation).</strong> 그러면 훔친 쪽과 진짜 사용자 중 한쪽은 반드시 &quot;이미 쓴 토큰&quot;을 내밀게 됩니다.</p>
+<p><a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/main/kotlin/com/site/domain/auth/service/AuthService.kt#L48-L74" target="_blank" rel="noopener">AuthService.kt</a></p>
+<figure class="code-block"><figcaption><span class="code-lang">Kotlin</span><button type="button" class="copy-button" aria-label="코드 복사">복사</button></figcaption><div class="highlight"><pre><span></span><code><span class="cm">/**</span>
+<span class="cm"> * Refresh Token Rotation (RTR) + 재사용 감지.</span>
+<span class="cm"> *</span>
+<span class="cm"> * - 정상: 쓴 토큰은 "사용됨"으로 바뀌고, 같은 패밀리로 새 토큰 쌍을 준다.</span>
+<span class="cm"> * - 이미 쓴 토큰이 다시 옴: 정상 사용자는 이미 새 토큰을 받았으므로 누군가 훔쳐 쓴 것이다.</span>
+<span class="cm"> *   패밀리 전체를 폐기해서 공격자와 사용자 모두 다시 로그인하게 한다. (다른 기기의 로그인은 다른 패밀리라 유지)</span>
+<span class="cm"> * - 폐기된 패밀리의 토큰: 재사용이 감지된 뒤 공격자가 받아 간 새 토큰까지 여기서 막힌다.</span>
+<span class="cm"> */</span>
+<span class="kd">fun</span><span class="w"> </span><span class="nf">reissue</span><span class="p">(</span><span class="n">refreshToken</span><span class="p">:</span><span class="w"> </span><span class="kt">String</span><span class="p">):</span><span class="w"> </span><span class="n">TokenPair</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kd">val</span><span class="w"> </span><span class="nv">owner</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">when</span><span class="w"> </span><span class="p">(</span><span class="kd">val</span><span class="w"> </span><span class="nv">result</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">refreshTokenStore</span><span class="p">.</span><span class="na">consume</span><span class="p">(</span><span class="n">refreshToken</span><span class="p">))</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="k">is</span><span class="w"> </span><span class="n">ConsumeResult</span><span class="p">.</span><span class="na">Consumed</span><span class="w"> </span><span class="o">-&gt;</span><span class="w"> </span><span class="n">result</span><span class="p">.</span><span class="na">owner</span>
+<span class="w">        </span><span class="k">is</span><span class="w"> </span><span class="n">ConsumeResult</span><span class="p">.</span><span class="na">Reused</span><span class="w"> </span><span class="o">-&gt;</span><span class="w"> </span><span class="p">{</span>
+<span class="w">            </span><span class="n">refreshTokenStore</span><span class="p">.</span><span class="na">revokeFamily</span><span class="p">(</span><span class="n">result</span><span class="p">.</span><span class="na">owner</span><span class="p">.</span><span class="na">familyId</span><span class="p">)</span>
+<span class="w">            </span><span class="n">log</span><span class="p">.</span><span class="na">warn</span><span class="p">(</span><span class="s">"Refresh Token 재사용 감지 — 탈취 의심으로 토큰 패밀리를 폐기합니다. {}"</span><span class="p">,</span><span class="w"> </span><span class="n">result</span><span class="p">.</span><span class="na">owner</span><span class="p">)</span>
+<span class="w">            </span><span class="k">throw</span><span class="w"> </span><span class="n">ServiceException</span><span class="p">(</span><span class="n">ErrorCode</span><span class="p">.</span><span class="na">REFRESH_TOKEN_REUSED</span><span class="p">)</span>
+<span class="w">        </span><span class="p">}</span>
+<span class="w">        </span><span class="n">ConsumeResult</span><span class="p">.</span><span class="na">Invalid</span><span class="w"> </span><span class="o">-&gt;</span><span class="w"> </span><span class="k">throw</span><span class="w"> </span><span class="n">ServiceException</span><span class="p">(</span><span class="n">ErrorCode</span><span class="p">.</span><span class="na">INVALID_REFRESH_TOKEN</span><span class="p">)</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">refreshTokenStore</span><span class="p">.</span><span class="na">isFamilyRevoked</span><span class="p">(</span><span class="n">owner</span><span class="p">.</span><span class="na">familyId</span><span class="p">))</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="k">throw</span><span class="w"> </span><span class="n">ServiceException</span><span class="p">(</span><span class="n">ErrorCode</span><span class="p">.</span><span class="na">INVALID_REFRESH_TOKEN</span><span class="p">)</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">    </span><span class="kd">val</span><span class="w"> </span><span class="nv">member</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">memberRepository</span><span class="p">.</span><span class="na">findByIdOrNull</span><span class="p">(</span><span class="n">owner</span><span class="p">.</span><span class="na">memberId</span><span class="p">)</span>
+<span class="w">        </span><span class="o">?:</span><span class="w"> </span><span class="k">throw</span><span class="w"> </span><span class="n">ServiceException</span><span class="p">(</span><span class="n">ErrorCode</span><span class="p">.</span><span class="na">INVALID_REFRESH_TOKEN</span><span class="p">)</span>
+
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="n">issueTokens</span><span class="p">(</span><span class="n">member</span><span class="p">,</span><span class="w"> </span><span class="n">familyId</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">owner</span><span class="p">.</span><span class="na">familyId</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></div>
+</figure>
+<figure class="diagram"><pre class="mermaid" data-source="sequenceDiagram
+    participant V as 사용자
+    participant X as 공격자
+    participant S as 서버
+    Note over V,X: 둘 다 refresh R1 을 가지고 있다
+    X-&gt;&gt;S: 재발급 (R1)
+    S--&gt;&gt;X: R2 (R1 은 &quot;사용됨&quot;)
+    V-&gt;&gt;S: 재발급 (R1)
+    S-&gt;&gt;S: R1 은 이미 사용됨 → 패밀리 폐기
+    S--&gt;&gt;V: 401 REFRESH_TOKEN_REUSED
+    X-&gt;&gt;S: 재발급 (R2)
+    S--&gt;&gt;X: 401 (폐기된 패밀리)
+">sequenceDiagram
+    participant V as 사용자
+    participant X as 공격자
+    participant S as 서버
+    Note over V,X: 둘 다 refresh R1 을 가지고 있다
+    X-&gt;&gt;S: 재발급 (R1)
+    S--&gt;&gt;X: R2 (R1 은 &quot;사용됨&quot;)
+    V-&gt;&gt;S: 재발급 (R1)
+    S-&gt;&gt;S: R1 은 이미 사용됨 → 패밀리 폐기
+    S--&gt;&gt;V: 401 REFRESH_TOKEN_REUSED
+    X-&gt;&gt;S: 재발급 (R2)
+    S--&gt;&gt;X: 401 (폐기된 패밀리)
+</pre></figure>
+<p><strong>패밀리</strong>는 로그인 한 번에서 이어지는 토큰들의 묶음입니다. 폐기를 패밀리 단위로 하면, 같은 사람이 다른 기기에서 한 로그인은 영향을 받지 않습니다.</p>
+<h3 id="꺼내기와-사용됨-표시는-원자적이어야-한다">&quot;꺼내기&quot;와 &quot;사용됨 표시&quot;는 원자적이어야 한다 <a class="header-anchor" href="#꺼내기와-사용됨-표시는-원자적이어야-한다">#</a></h3>
+<p><a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/main/kotlin/com/site/domain/auth/port/RefreshTokenStore.kt#L14-L18" target="_blank" rel="noopener">RefreshTokenStore.kt</a></p>
+<figure class="code-block"><figcaption><span class="code-lang">Kotlin</span><button type="button" class="copy-button" aria-label="코드 복사">복사</button></figcaption><div class="highlight"><pre><span></span><code><span class="cm">/**</span>
+<span class="cm"> * 토큰을 꺼내면서 "사용됨"으로 표시한다. 꺼내기와 표시는 원자적이어야 한다.</span>
+<span class="cm"> * (따로 하면 동시에 들어온 두 요청이 둘 다 "모르는 토큰"으로 판단돼 재사용을 놓칠 수 있다)</span>
+<span class="cm"> */</span>
+<span class="kd">fun</span><span class="w"> </span><span class="nf">consume</span><span class="p">(</span><span class="n">refreshToken</span><span class="p">:</span><span class="w"> </span><span class="kt">String</span><span class="p">):</span><span class="w"> </span><span class="n">ConsumeResult</span>
+</code></pre></div>
+</figure>
+<p>Redis 명령 두 개(GET 후 DEL)를 따로 보내면 그 사이에 다른 요청이 끼어듭니다. Redis 는 <strong>Lua 스크립트 하나를 실행하는 동안 다른 명령을 끼워 넣지 않습니다.</strong> 그래서 스크립트로 묶었습니다.</p>
+<p><a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/main/kotlin/com/site/infrastructure/redis/RedisRefreshTokenStore.kt#L77-L93" target="_blank" rel="noopener">RedisRefreshTokenStore.kt</a></p>
+<figure class="code-block"><figcaption><span class="code-lang">Kotlin</span><button type="button" class="copy-button" aria-label="코드 복사">복사</button></figcaption><div class="highlight"><pre><span></span><code><span class="c1">// KEYS: 토큰 키, 사용됨 키 / ARGV: TTL(초)</span>
+<span class="c1">// 아직 안 쓴 토큰이면 꺼내면서 "사용됨"으로 옮기고, 이미 쓴 토큰이면 그 주인을 알려준다.</span>
+<span class="kd">private</span><span class="w"> </span><span class="kd">val</span><span class="w"> </span><span class="nv">CONSUME_SCRIPT</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">DefaultRedisScript</span><span class="p">(</span>
+<span class="w">    </span><span class="s">"""</span>
+<span class="s">    local owner = redis.call('GETDEL', KEYS[1])</span>
+<span class="s">    if owner then</span>
+<span class="s">      redis.call('SET', KEYS[2], owner, 'EX', ARGV[1])</span>
+<span class="s">      return 'CONSUMED|' .. owner</span>
+<span class="s">    end</span>
+<span class="s">    local used = redis.call('GET', KEYS[2])</span>
+<span class="s">    if used then</span>
+<span class="s">      return 'REUSED|' .. used</span>
+<span class="s">    end</span>
+<span class="s">    return nil</span>
+<span class="s">    """</span><span class="p">.</span><span class="na">trimIndent</span><span class="p">(),</span>
+<span class="w">    </span><span class="kt">String</span><span class="o">::</span><span class="n">class</span><span class="p">.</span><span class="na">java</span><span class="p">,</span>
+<span class="p">)</span>
+</code></pre></div>
+</figure>
+<p>키 설계도 주석에 있습니다.</p>
+<p><a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/main/kotlin/com/site/infrastructure/redis/RedisRefreshTokenStore.kt#L13-L21" target="_blank" rel="noopener">RedisRefreshTokenStore.kt</a></p>
+<figure class="code-block"><figcaption><span class="code-lang">Kotlin</span><button type="button" class="copy-button" aria-label="코드 복사">복사</button></figcaption><div class="highlight"><pre><span></span><code><span class="cm">/**</span>
+<span class="cm"> * - refresh-token:{해시}              → "memberId:familyId"  (아직 안 쓴 토큰)</span>
+<span class="cm"> * - refresh-token:{해시}:used         → "memberId:familyId"  (이미 쓴 토큰 — 재사용 감지용)</span>
+<span class="cm"> * - refresh-token-family:{familyId}:revoked → "1"           (폐기된 패밀리)</span>
+<span class="cm"> * 모두 TTL = refresh token 만료 시간.</span>
+<span class="cm"> *</span>
+<span class="cm"> * 토큰 원문 대신 SHA-256 해시를 키로 쓴다. Redis 가 유출돼도 키만으로는 토큰을 쓸 수 없다.</span>
+<span class="cm"> * 중괄호는 Redis Cluster 해시 태그 — 같은 토큰의 두 키가 같은 슬롯에 있어야 Lua 에서 함께 쓸 수 있다.</span>
+<span class="cm"> */</span>
+</code></pre></div>
+</figure>
+<ul>
+<li>비밀번호처럼, 토큰 원문은 저장하지 않고 해시만 저장합니다.</li>
+<li><code>{해시}</code> 의 중괄호는 Redis Cluster 의 <strong>해시 태그</strong>입니다. 클러스터는 키를 여러 서버에 나눠 담는데, 중괄호 안이 같은 키들은 같은 곳에 둡니다. Lua 스크립트는 한 서버 안의 키만 다룰 수 있어서 필요합니다. (<a href="09-redis-queue.html">9장</a>에서 다시)</li>
+</ul>
+<h2 id="8-로그아웃--블랙리스트는-원래-만료-시각까지만">8. 로그아웃 — 블랙리스트는 원래 만료 시각까지만 <a class="header-anchor" href="#8-로그아웃--블랙리스트는-원래-만료-시각까지만">#</a></h2>
+<p><a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/main/kotlin/com/site/infrastructure/redis/RedisAccessTokenBlacklist.kt#L10-L37" target="_blank" rel="noopener">RedisAccessTokenBlacklist.kt</a></p>
+<figure class="code-block"><figcaption><span class="code-lang">Kotlin</span><button type="button" class="copy-button" aria-label="코드 복사">복사</button></figcaption><div class="highlight"><pre><span></span><code><span class="cm">/**</span>
+<span class="cm"> * access-token:blacklist:{jti} → "logout"</span>
+<span class="cm"> *</span>
+<span class="cm"> * 로그아웃한 access token 을 원래 만료 시각까지만 블랙리스트에 둔다.</span>
+<span class="cm"> * 그 이후에는 어차피 만료 검증에서 걸리므로 TTL 로 Redis 가 알아서 지우게 한다.</span>
+<span class="cm"> */</span>
+<span class="nd">@Component</span>
+<span class="kd">class</span><span class="w"> </span><span class="nc">RedisAccessTokenBlacklist</span><span class="p">(</span>
+<span class="w">    </span><span class="kd">private</span><span class="w"> </span><span class="kd">val</span><span class="w"> </span><span class="nv">redisTemplate</span><span class="p">:</span><span class="w"> </span><span class="n">StringRedisTemplate</span><span class="p">,</span>
+<span class="w">    </span><span class="kd">private</span><span class="w"> </span><span class="kd">val</span><span class="w"> </span><span class="nv">clock</span><span class="p">:</span><span class="w"> </span><span class="n">Clock</span><span class="p">,</span>
+<span class="p">)</span><span class="w"> </span><span class="p">:</span><span class="w"> </span><span class="n">AccessTokenBlacklist</span><span class="w"> </span><span class="p">{</span>
+
+<span class="w">    </span><span class="kd">override</span><span class="w"> </span><span class="kd">fun</span><span class="w"> </span><span class="nf">add</span><span class="p">(</span><span class="n">tokenId</span><span class="p">:</span><span class="w"> </span><span class="kt">String</span><span class="p">,</span><span class="w"> </span><span class="n">expiresAt</span><span class="p">:</span><span class="w"> </span><span class="n">Instant</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="kd">val</span><span class="w"> </span><span class="nv">ttl</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Duration</span><span class="p">.</span><span class="na">between</span><span class="p">(</span><span class="n">clock</span><span class="p">.</span><span class="na">instant</span><span class="p">(),</span><span class="w"> </span><span class="n">expiresAt</span><span class="p">)</span>
+<span class="w">        </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">ttl</span><span class="p">.</span><span class="na">isNegative</span><span class="w"> </span><span class="o">||</span><span class="w"> </span><span class="n">ttl</span><span class="p">.</span><span class="na">isZero</span><span class="p">)</span><span class="w"> </span><span class="k">return</span>
+
+<span class="w">        </span><span class="n">redisTemplate</span><span class="p">.</span><span class="na">opsForValue</span><span class="p">().</span><span class="na">set</span><span class="p">(</span><span class="n">key</span><span class="p">(</span><span class="n">tokenId</span><span class="p">),</span><span class="w"> </span><span class="n">LOGOUT_VALUE</span><span class="p">,</span><span class="w"> </span><span class="n">ttl</span><span class="p">)</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="kd">override</span><span class="w"> </span><span class="kd">fun</span><span class="w"> </span><span class="nf">contains</span><span class="p">(</span><span class="n">tokenId</span><span class="p">:</span><span class="w"> </span><span class="kt">String</span><span class="p">):</span><span class="w"> </span><span class="kt">Boolean</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">redisTemplate</span><span class="p">.</span><span class="na">hasKey</span><span class="p">(</span><span class="n">key</span><span class="p">(</span><span class="n">tokenId</span><span class="p">))</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="kc">true</span>
+
+<span class="w">    </span><span class="kd">private</span><span class="w"> </span><span class="kd">fun</span><span class="w"> </span><span class="nf">key</span><span class="p">(</span><span class="n">tokenId</span><span class="p">:</span><span class="w"> </span><span class="kt">String</span><span class="p">)</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">"</span><span class="si">$</span><span class="n">KEY_PREFIX</span><span class="si">$</span><span class="n">tokenId</span><span class="s">"</span>
+
+<span class="w">    </span><span class="kd">companion</span><span class="w"> </span><span class="kd">object</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="kd">private</span><span class="w"> </span><span class="kd">const</span><span class="w"> </span><span class="kd">val</span><span class="w"> </span><span class="nv">KEY_PREFIX</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">"access-token:blacklist:"</span>
+<span class="w">        </span><span class="kd">private</span><span class="w"> </span><span class="kd">const</span><span class="w"> </span><span class="kd">val</span><span class="w"> </span><span class="nv">LOGOUT_VALUE</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">"logout"</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+</figure>
+<p>블랙리스트가 무한히 커지지 않는 이유가 TTL 입니다. 30분짜리 토큰이면 최대 30분만 기억합니다. TTL 도 서비스 <code>Clock</code> 으로 계산합니다(처음에는 <code>Instant.now()</code> 를 직접 불렀습니다, #66).</p>
+<p>로그아웃은 refresh token 패밀리도 폐기합니다. 단, <strong>본인 것일 때만</strong> 폐기합니다.</p>
+<figure class="code-block"><figcaption><span class="code-lang">Kotlin</span><button type="button" class="copy-button" aria-label="코드 복사">복사</button></figcaption><div class="highlight"><pre><span></span><code><span class="c1">// AuthService.logout</span>
+<span class="w">        </span><span class="n">refreshTokenStore</span><span class="p">.</span><span class="na">findOwner</span><span class="p">(</span><span class="n">refreshToken</span><span class="p">)</span>
+<span class="w">            </span><span class="o">?.</span><span class="na">takeIf</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nb">it</span><span class="p">.</span><span class="na">memberId</span><span class="w"> </span><span class="o">==</span><span class="w"> </span><span class="n">memberId</span><span class="w"> </span><span class="p">}</span>
+<span class="w">            </span><span class="o">?.</span><span class="na">let</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="n">refreshTokenStore</span><span class="p">.</span><span class="na">revokeFamily</span><span class="p">(</span><span class="nb">it</span><span class="p">.</span><span class="na">familyId</span><span class="p">)</span><span class="w"> </span><span class="p">}</span>
+</code></pre></div>
+</figure>
+<p>남의 refresh token 을 로그아웃 요청에 끼워 넣어 남을 강제로 로그아웃시키는 것을 막습니다.</p>
+<h2 id="흔한-실수">흔한 실수 <a class="header-anchor" href="#흔한-실수">#</a></h2>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>실수</th>
+<th>결과</th>
+<th>대신</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>JWT 필터에 <code>@Component</code></td>
+<td>서블릿 필터로도 등록돼 두 번 실행</td>
+<td><code>SecurityConfig</code> 에서 직접 생성</td>
+</tr>
+<tr>
+<td>필터에서 바로 401 을 쓴다</td>
+<td>공개 경로까지 막거나, 에러 이유가 뭉개진다</td>
+<td>이유만 기록, 응답은 EntryPoint</td>
+</tr>
+<tr>
+<td>JWT 에 비밀 정보를 넣는다</td>
+<td>Base64 로 누구나 읽는다</td>
+<td>ID·권한만</td>
+</tr>
+<tr>
+<td>refresh token 을 원문으로 저장</td>
+<td>저장소 유출 = 토큰 유출</td>
+<td>해시 저장</td>
+</tr>
+<tr>
+<td>꺼내기와 사용됨 표시를 따로</td>
+<td>동시 요청에서 재사용 감지를 놓친다</td>
+<td>Lua 로 원자적으로</td>
+</tr>
+<tr>
+<td>블랙리스트에 TTL 없음</td>
+<td>영원히 쌓인다</td>
+<td>토큰 남은 수명만큼</td>
+</tr>
+<tr>
+<td><code>import org.springframework.security.config.annotation.web.invoke</code> 누락</td>
+<td><code>http { }</code> 가 컴파일되지 않는다</td>
+<td>import 확인</td>
+</tr>
+</tbody>
+</table></div>
+<h2 id="직접-해보기">직접 해보기 <a class="header-anchor" href="#직접-해보기">#</a></h2>
+<ol>
+<li><a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/test/kotlin/com/site/infrastructure/security/jwt/JwtTokenProviderTest.kt" target="_blank" rel="noopener">JwtTokenProviderTest</a> 를 읽고, &quot;role 클레임이 없는 토큰&quot;을 거절하는 테스트를 추가하려면 어떤 결과를 기대해야 할지 정해 보세요. 지금 코드에서는 어떤 예외가 날까요?</li>
+<li>같은 refresh token 으로 동시에 재발급 요청 2개가 오면 각각 어떤 응답을 받나요? Lua 스크립트 없이 GET → DEL 로 구현했다면 어떻게 달라질까요?</li>
+<li>관리자 기능이 커져서 &quot;관리자별 담당 이벤트&quot; 정보가 필요해졌습니다. Role 방식을 유지하면서 어디에 그 정보를 두면 좋을까요?</li>
+</ol>
+<p>다음 장: <a href="07-concurrency.html">7장. 동시성 제어</a></p>
+
+</article>
+<p class="source-link"><a href="https://github.com/RosieOh/Kopring_Core/blob/main/docs/06-auth.md" target="_blank" rel="noopener">이 장의 원본 Markdown 보기</a></p>
+<nav class="pager" aria-label="장 이동"><a class="pager-prev" href="05-web-and-errors.html"><span>이전</span>5장. 웹 계층과 예외 처리</a><a class="pager-next" href="07-concurrency.html"><span>다음</span>7장. 동시성 제어</a></nav>
+</main>
+<nav class="page-toc" aria-label="이 장의 목차"><p class="page-toc-title">이 장에서</p><ol><li class="toc-level-2"><a href="#1-큰-그림">1. 큰 그림</a></li>
+<li class="toc-level-2"><a href="#2-spring-security-설정--kotlin-dsl">2. Spring Security 설정 — Kotlin DSL</a></li>
+<li class="toc-level-2"><a href="#3-요청마다--jwtauthenticationfilter">3. 요청마다 — JwtAuthenticationFilter</a></li>
+<li class="toc-level-2"><a href="#4-토큰-만들기와-읽기--jwttokenprovider">4. 토큰 만들기와 읽기 — JwtTokenProvider</a></li>
+<li class="toc-level-2"><a href="#5-권한--role-로-갈까-관리자-엔티티를-따로-둘까">5. 권한 — Role 로 갈까, 관리자 엔티티를 따로 둘까</a></li>
+<li class="toc-level-2"><a href="#6-로그인--같은-에러-새-토큰-패밀리">6. 로그인 — 같은 에러, 새 토큰 패밀리</a></li>
+<li class="toc-level-2"><a href="#7-재발급--refresh-token-rotation-과-재사용-감지">7. 재발급 — Refresh Token Rotation 과 재사용 감지</a></li>
+<li class="toc-level-3"><a href="#꺼내기와-사용됨-표시는-원자적이어야-한다">&quot;꺼내기&quot;와 &quot;사용됨 표시&quot;는 원자적이어야 한다</a></li>
+<li class="toc-level-2"><a href="#8-로그아웃--블랙리스트는-원래-만료-시각까지만">8. 로그아웃 — 블랙리스트는 원래 만료 시각까지만</a></li>
+<li class="toc-level-2"><a href="#흔한-실수">흔한 실수</a></li>
+<li class="toc-level-2"><a href="#직접-해보기">직접 해보기</a></li></ol></nav>
+</div>
+</body>
+</html>

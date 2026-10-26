@@ -1,0 +1,317 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>12장. 다음 공부와 연습 문제 — 코프링 교재</title>
+<meta name="description" content="선착순 쿠폰 코드로 배우는 Kotlin + Spring Boot">
+<script>try{var t=localStorage.getItem("book-theme");if(t)document.documentElement.dataset.theme=t;}catch(e){}</script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+<link rel="stylesheet" href="assets/book.css">
+<link rel="stylesheet" href="assets/highlight.css">
+<script src="assets/book.js" defer></script>
+</head>
+<body>
+<a class="skip-link" href="#content">본문으로 건너뛰기</a>
+<header class="topbar">
+  <button type="button" class="menu-button" aria-label="장 목록 열기" aria-expanded="false" aria-controls="sidebar">목차</button>
+  <a class="topbar-title" href="index.html">코프링 교재</a>
+  <button type="button" class="theme-button" aria-label="밝은 화면과 어두운 화면 바꾸기">화면</button>
+</header>
+<div class="layout">
+<aside class="sidebar" id="sidebar">
+  <a class="sidebar-title" href="index.html">코프링 교재<small>선착순 쿠폰으로 배우는 Kotlin + Spring Boot</small></a>
+  <nav aria-label="장 목록"><ol class="chapter-list">
+<li><a href="index.html">처음에 — 읽는 법과 목차</a></li>
+<li><a href="01-kotlin-basics.html">1장. Kotlin 기초</a></li>
+<li><a href="02-spring-meets-kotlin.html">2장. 스프링이 Kotlin 을 만나면</a></li>
+<li><a href="03-architecture.html">3장. 프로젝트 구조와 계층</a></li>
+<li><a href="04-jpa-with-kotlin.html">4장. JPA 엔티티를 Kotlin 으로</a></li>
+<li><a href="05-web-and-errors.html">5장. 웹 계층과 예외 처리</a></li>
+<li><a href="06-auth.html">6장. 인증</a></li>
+<li><a href="07-concurrency.html">7장. 동시성 제어</a></li>
+<li><a href="08-async-and-reliability.html">8장. 비동기와 신뢰성</a></li>
+<li><a href="09-redis-queue.html">9장. Redis 대기열</a></li>
+<li><a href="10-testing.html">10장. 테스트</a></li>
+<li><a href="11-observability-and-load-test.html">11장. 관측과 부하 테스트</a></li>
+<li><a href="12-next-steps-and-exercises.html" aria-current="page">12장. 다음 공부와 연습 문제</a></li>
+<li><a href="13-virtual-threads-and-backpressure.html">13장. 심화: 가상 스레드와 몰림 대응</a></li>
+  </ol></nav>
+</aside>
+<main id="content" class="content">
+<article class="markdown">
+<h1 id="12장-다음-공부와-연습-문제">12장. 다음 공부와 연습 문제 <a class="header-anchor" href="#12장-다음-공부와-연습-문제">#</a></h1>
+<p><strong>한 줄 요약</strong>: 이 저장소에서 바로 해볼 수 있는 확장 과제와, 1~11장 연습 문제의 힌트를 모았습니다. 힌트는 답을 다 알려 주지 않습니다. 코드를 직접 고쳐 보고 테스트로 확인하는 것이 가장 빨리 느는 길입니다.</p>
+<h2 id="1-다음에-공부할-것">1. 다음에 공부할 것 <a class="header-anchor" href="#1-다음에-공부할-것">#</a></h2>
+<h3 id="kotlin">Kotlin <a class="header-anchor" href="#kotlin">#</a></h3>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>주제</th>
+<th>왜</th>
+<th>이 저장소에서 연결되는 곳</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>코루틴 (<code>suspend</code>, structured concurrency, <code>Flow</code>)</td>
+<td>스레드를 덜 쓰고 기다리는 코드를 순차 코드처럼 쓴다</td>
+<td>지금은 스레드 풀(<code>@Async</code>)과 스케줄러로 비동기를 처리한다. 같은 일을 코루틴으로 하면 어떻게 다를지 비교해 보기</td>
+</tr>
+<tr>
+<td><code>inline</code> + <code>reified</code></td>
+<td>제네릭 타입을 실행 중에도 쓰게 한다</td>
+<td><code>runApplication&lt;SiteApplication&gt;()</code>, <code>addFilterBefore&lt;...&gt;()</code> 가 이 기능</td>
+</tr>
+<tr>
+<td>DSL 만들기 (수신 객체 지정 람다)</td>
+<td><code>http { ... }</code> 같은 문법을 직접 만든다</td>
+<td>Spring Security Kotlin DSL (<a href="06-auth.html">6장</a>)</td>
+</tr>
+<tr>
+<td><code>value class</code></td>
+<td><code>Long</code> 하나를 감싸 타입을 구분한다 (회원 ID 와 이벤트 ID 를 섞지 않게)</td>
+<td><code>issue(couponEventId: Long, memberId: Long)</code> 의 두 Long 을 바꿔 넣어도 컴파일된다</td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="spring-과-운영">Spring 과 운영 <a class="header-anchor" href="#spring-과-운영">#</a></h3>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>주제</th>
+<th>왜</th>
+<th>출발점</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>가상 스레드 (Java 21, <code>spring.threads.virtual.enabled</code>)</td>
+<td>요청 스레드가 I/O 를 기다리는 동안 OS 스레드를 붙잡지 않는다</td>
+<td>이 저장소는 M5 에서 켰다. 무엇이 무너졌고 어떻게 고쳤는지는 <a href="13-virtual-threads-and-backpressure.html">13장</a>. 다음은 JDK 24+ 의 JEP 491(<code>synchronized</code> 고정 해소)</td>
+</tr>
+<tr>
+<td>동시 실행 제한 (bulkhead) · 요청 수 제한 (rate limit)</td>
+<td>한 기능이 커넥션 풀을 다 차지하지 않게 / 악의적 반복 요청 막기</td>
+<td>bulkhead 는 M5 에서 했다(<a href="13-virtual-threads-and-backpressure.html">13장</a>). 회원별 rate limit 은 아직 없다</td>
+</tr>
+<tr>
+<td>서버 여러 대</td>
+<td>이 프로젝트의 캐시·SSE 연결은 서버마다 따로 있다</td>
+<td><code>StartedCouponEventCache</code>, <code>CouponQueueStatusStreams</code> 주석</td>
+</tr>
+<tr>
+<td>메시지 브로커 (Kafka 등)</td>
+<td>Redis 대기열·Outbox 를 더 큰 규모로</td>
+<td>Outbox 테이블을 읽어 브로커로 보내는 구조(CDC)로 발전</td>
+</tr>
+</tbody>
+</table></div>
+<h3 id="테스트">테스트 <a class="header-anchor" href="#테스트">#</a></h3>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>주제</th>
+<th>출발점</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Kotest 속성 기반 테스트 (<code>checkAll</code>)</td>
+<td><code>Discount.calculate</code> 에 &quot;할인액은 0 이상, 주문 금액 이하&quot;를 무작위 입력으로 확인해 보기</td>
+</tr>
+<tr>
+<td>장애 주입</td>
+<td>Outbox 테스트처럼 &quot;장애가 남기는 흔적&quot;을 만들어 재현하기 (<a href="08-async-and-reliability.html">8장</a>)</td>
+</tr>
+</tbody>
+</table></div>
+<p>공식 문서: <a href="https://kotlinlang.org/docs/home.html" target="_blank" rel="noopener">Kotlin</a> · <a href="https://docs.spring.io/spring-boot/" target="_blank" rel="noopener">Spring Boot</a> · <a href="https://kotest.io/" target="_blank" rel="noopener">Kotest</a> · <a href="https://mockk.io/" target="_blank" rel="noopener">MockK</a> · <a href="https://grafana.com/docs/k6/latest/" target="_blank" rel="noopener">k6</a></p>
+<h2 id="2-이-저장소에서-해볼-확장-과제">2. 이 저장소에서 해볼 확장 과제 <a class="header-anchor" href="#2-이-저장소에서-해볼-확장-과제">#</a></h2>
+<p>난이도 순입니다. 각 과제는 이슈 → 브랜치 → PR 순서로 해 보세요. 이 저장소의 커밋·PR 기록이 좋은 예시입니다.</p>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>과제</th>
+<th>배우는 것</th>
+<th>건드릴 곳</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>대기열이 닫히면(소진·종료) SSE 구독자에게 바로 결과 보내기</td>
+<td>이벤트 기반 알림, 폴링 주기와의 관계</td>
+<td><code>CouponQueueStatusStreams</code>, <code>CouponQueueWorker</code></td>
+</tr>
+<tr>
+<td>이벤트 일시 중지</td>
+<td>상태 설계, 마이그레이션, <strong>캐시 무효화</strong></td>
+<td><code>CouponEvent</code>, <code>StartedCouponEventCache</code>, <code>V5__...</code></td>
+</tr>
+<tr>
+<td>쿠폰 발급 취소</td>
+<td>수량 되돌리기, &quot;소진은 되돌아가지 않는다&quot; 가정 깨기</td>
+<td><code>CouponIssueService</code>, <code>StartedCouponEventCache</code></td>
+</tr>
+<tr>
+<td>회원별 요청 수 제한 (rate limit)</td>
+<td>토큰 버킷, Redis 로 서버 여러 대에서 함께 세기</td>
+<td>필터 또는 <code>CouponIssueFacade</code>, Redisson <code>RRateLimiter</code></td>
+</tr>
+<tr>
+<td>k6 를 다른 기계에서 돌려 M5 를 다시 재기</td>
+<td>측정 환경 분리, 흔들림을 줄이는 법</td>
+<td><code>load-test/</code>, <a href="13-virtual-threads-and-backpressure.html">13장</a> 6절</td>
+</tr>
+<tr>
+<td>추첨(<code>LOTTERY</code>) 발급 방식</td>
+<td>enum 확장, sealed·when 의 힘</td>
+<td><code>CouponIssueMode</code> 와 그 <code>when</code> 들</td>
+</tr>
+</tbody>
+</table></div>
+<h2 id="3-코드-리뷰-연습--이-코드의-약점-찾기">3. 코드 리뷰 연습 — 이 코드의 약점 찾기 <a class="header-anchor" href="#3-코드-리뷰-연습--이-코드의-약점-찾기">#</a></h2>
+<p>좋은 코드에도 약점이 있습니다. 아래는 교재를 쓰면서 찾은 것들이고, 1~3번은 그 뒤 M6 에서 고쳤습니다. 그래서 링크는 <strong>고치기 전 코드</strong>(M5 릴리스, <code>1dc5d62</code>)를 가리킵니다. 먼저 스스로 찾아본 뒤 답과 고친 PR 을 보세요.</p>
+<ol>
+<li><a href="https://github.com/RosieOh/Kopring_Core/blob/1dc5d62/src/main/kotlin/com/site/presentation/coupon/api/CouponController.kt#L55" target="_blank" rel="noopener">CouponController.kt</a> 의 <code>issue()</code> 주석</li>
+<li><a href="https://github.com/RosieOh/Kopring_Core/blob/1dc5d62/src/main/kotlin/com/site/infrastructure/security/jwt/JwtTokenProvider.kt#L57-L70" target="_blank" rel="noopener">JwtTokenProvider.parseAccessToken</a> 이 서명은 맞지만 <code>role</code> 클레임이 없는 토큰을 받으면</li>
+<li><a href="https://github.com/RosieOh/Kopring_Core/blob/1dc5d62/src/main/kotlin/com/site/infrastructure/redis/RedisAccessTokenBlacklist.kt#L20-L25" target="_blank" rel="noopener">RedisAccessTokenBlacklist.add</a> 의 현재 시각</li>
+<li><a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/main/kotlin/com/site/domain/auth/service/AuthService.kt" target="_blank" rel="noopener">AuthService.reissue</a> 를 한 사용자가 두 탭에서 동시에 부르면 (지금 코드)</li>
+</ol>
+<details>
+<summary>답</summary>
+<ol>
+<li>&quot;즉시 발급 (분산락 + 사전 검사)&quot; 는 M4 이전 설명이었습니다. 기본 방식은 원자적 UPDATE 이고 M5 에서는 동시 실행 제한도 더해졌습니다. 주석은 코드와 함께 늙습니다. → #65 에서 고침</li>
+<li><code>claims.get(ROLE_CLAIM, String::class.java)</code> 가 null 을 돌려주고, null 이 될 수 없는 <code>MemberRole.valueOf</code> 의 인자로 넘기는 순간 Kotlin 의 null 검사가 <code>NullPointerException</code> 을 던집니다. 이것은 <code>JwtException</code> 이 아니라서 <code>catch</code> 에 걸리지 않고, 필터는 <code>ServiceException</code> 만 잡으므로 401 대신 500 이 납니다. <code>sub</code> 가 숫자가 아니거나 <code>jti</code>·<code>exp</code> 가 없어도 마찬가지였습니다. → #64 에서 클레임을 꺼내다 하나라도 이상하면 <code>INVALID_TOKEN</code>(401)으로 고침</li>
+<li><code>Instant.now()</code> 를 직접 씁니다. 다른 곳은 <code>Clock</code> 빈을 쓰는데 여기만 달라서, 테스트에서 시간을 통제할 수 없습니다. <code>JwtTokenProvider</code> 의 발급 시각(<code>Date()</code>)과 jjwt 의 만료 검증도 같은 문제였습니다. → #66 에서 고침</li>
+<li>둘 다 같은 refresh token 을 보내면 하나는 <code>CONSUMED</code>, 다른 하나는 <code>REUSED</code> 가 되어 패밀리 전체가 폐기됩니다. 정상 사용자인데 로그아웃됩니다. Refresh Token Rotation 의 알려진 대가이고, 보통 &quot;직전 토큰은 몇 초 동안 한 번 더 허용&quot;하는 유예 시간으로 완화합니다. (아직 고치지 않았습니다. 해 볼 만한 과제입니다)</li>
+</ol>
+</details>
+<h2 id="4-연습-문제-힌트">4. 연습 문제 힌트 <a class="header-anchor" href="#4-연습-문제-힌트">#</a></h2>
+<h3 id="1장-kotlin-기초">1장. Kotlin 기초 <a class="header-anchor" href="#1장-kotlin-기초">#</a></h3>
+<ol>
+<li><strong><code>LOTTERY</code> 추가</strong> — <code>CouponIssueMode.checkRequested</code> 의 <code>when (this)</code> 가 깨집니다. <code>else</code> 가 없어서 새 값을 어떻게 처리할지(어떤 <code>ErrorCode</code> 를 줄지) 정해야 합니다. 이것이 &quot;else 를 쓰지 않는&quot; 이유입니다.</li>
+<li><strong><code>resolveToken</code> 을 if 문으로</strong> — 이런 모양이 됩니다(<code>// 예시</code>).<figure class="code-block"><figcaption><span class="code-lang">Kotlin</span><button type="button" class="copy-button" aria-label="코드 복사">복사</button></figcaption><div class="highlight"><pre><span></span><code><span class="c1">// 예시</span>
+<span class="kd">val</span><span class="w"> </span><span class="nv">header</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">request</span><span class="p">.</span><span class="na">getHeader</span><span class="p">(</span><span class="n">HttpHeaders</span><span class="p">.</span><span class="na">AUTHORIZATION</span><span class="p">)</span><span class="w"> </span><span class="o">?:</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="kc">null</span>
+<span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="o">!</span><span class="n">header</span><span class="p">.</span><span class="na">startsWith</span><span class="p">(</span><span class="n">BEARER_PREFIX</span><span class="p">))</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="kc">null</span>
+<span class="kd">val</span><span class="w"> </span><span class="nv">token</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">header</span><span class="p">.</span><span class="na">removePrefix</span><span class="p">(</span><span class="n">BEARER_PREFIX</span><span class="p">)</span>
+<span class="k">return</span><span class="w"> </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="n">token</span><span class="p">.</span><span class="na">isNotBlank</span><span class="p">())</span><span class="w"> </span><span class="n">token</span><span class="w"> </span><span class="k">else</span><span class="w"> </span><span class="kc">null</span>
+</code></pre></div>
+</figure>
+줄 수는 비슷하지만, 체인 버전은 &quot;단계마다 null 이면 멈춘다&quot;가 한눈에 보입니다. 어느 쪽이 읽기 쉬운지는 팀의 합의입니다.</li>
+<li><strong><code>status</code> 의 순서</strong> — 만료 확인을 먼저 하면, <strong>사용한 뒤 만료 시각이 지난 쿠폰</strong>이 <code>USED</code> 가 아니라 <code>EXPIRED</code> 로 보입니다. 내 쿠폰 목록에서 &quot;사용함&quot;이 &quot;만료됨&quot;으로 바뀌어 보이는 버그입니다.</li>
+<li><strong>for 문으로</strong> — <code>val results = mutableMapOf&lt;Long, CouponQueueResult&gt;()</code> 를 만들고 <code>issued</code>, <code>rejected</code> 를 각각 돌며 넣습니다. 바꿀 수 있는 컬렉션이 생기고 줄이 늘어납니다. 컬렉션 함수는 &quot;무엇을 만드는지&quot;만 남깁니다.</li>
+</ol>
+<h3 id="2장-스프링이-kotlin-을-만나면">2장. 스프링이 Kotlin 을 만나면 <a class="header-anchor" href="#2장-스프링이-kotlin-을-만나면">#</a></h3>
+<ol>
+<li><strong><code>plugin.spring</code> 제거</strong> — 컨텍스트가 뜨지 못합니다. <code>@Configuration</code> 클래스는 final 일 수 없다는 에러나, <code>@Transactional</code> 프록시(CGLIB)를 만들 수 없다는 에러가 납니다. 메시지에 <code>final</code> 이 보이는지 확인해 보세요.</li>
+<li><strong><code>drainBatchSize</code> 설정</strong> — <code>CouponQueueProperties</code> 에 <code>val drainBatchSize: Long = 1_000</code> 을 추가하고, 워커의 <code>DRAIN_BATCH_SIZE</code> 를 <code>properties.drainBatchSize</code> 로 바꿉니다. 메타데이터 JSON 에 <code>coupon.queue.drain-batch-size</code> 항목을 추가합니다.</li>
+<li><strong><code>distributed-lock</code> 으로 기동</strong> — <code>CouponIssueFacade.issue</code> 의 <code>when (properties.directStrategy)</code> 가 <code>DISTRIBUTED_LOCK</code> 분기로 가서 <code>issueWithDistributedLock</code> 을 부릅니다. 바뀌는 곳이 이 <code>when</code> 한 곳뿐이라는 점이 핵심입니다.</li>
+</ol>
+<h3 id="3장-프로젝트-구조와-계층">3장. 프로젝트 구조와 계층 <a class="header-anchor" href="#3장-프로젝트-구조와-계층">#</a></h3>
+<ol>
+<li><strong>ArchUnit 실패 메시지</strong> — <code>RedisCouponQueueStore</code> 를 받으면 &quot;domain 은 infrastructure 와 presentation 을 모른다&quot; 규칙 위반으로 실패하고, 어느 클래스의 어느 필드·생성자가 문제인지 알려 줍니다. <code>StringRedisTemplate</code> 은 <code>com.site.infrastructure</code> 패키지가 아니라서 <strong>통과합니다.</strong> 규칙은 적어 둔 것만 지킵니다.</li>
+<li><strong><code>InMemoryCouponQueueStore</code></strong> — <code>ConcurrentHashMap</code> 하나하나는 안전하지만, &quot;대기에서 꺼내 처리 중에 넣기&quot;처럼 <strong>여러 자료구조를 함께 바꾸는 연산</strong>은 원자적이지 않습니다. 이벤트별 <code>synchronized</code> 블록(또는 <code>ReentrantLock</code>)으로 각 연산 전체를 감싸야 포트의 약속을 지킵니다. 서버가 여러 대면 메모리 구현은 성립하지 않는다는 점도 생각해 보세요.</li>
+<li><strong>independent 정리</strong> — <code>CustomSpringELParser</code> 는 <code>DistributedLockAspect</code>(infrastructure)에서만 씁니다. 옮겨도 되지만, &quot;특정 기술에 묶이지 않은 범용 도구&quot;라서 independent 에 둔 판단도 이해할 수 있습니다. 정답보다 기준을 정하는 것이 중요합니다.</li>
+</ol>
+<h3 id="4장-jpa-엔티티를-kotlin-으로">4장. JPA 엔티티를 Kotlin 으로 <a class="header-anchor" href="#4장-jpa-엔티티를-kotlin-으로">#</a></h3>
+<ol>
+<li><strong>일시 중지</strong> — 시간으로 계산할 수 없는 <strong>사람의 결정</strong>이므로 저장해야 합니다. 예: <code>paused BOOLEAN NOT NULL DEFAULT FALSE</code> 컬럼과 <code>V5__add_pause_to_coupon_event.sql</code>. 그리고 함정이 있습니다. 시작된 이벤트를 멈출 수 있게 되면 <a href="07-concurrency.html">7장</a>의 <code>StartedCouponEventCache</code> 가 기대는 &quot;시작 후에는 바뀌지 않는다&quot;가 깨집니다.</li>
+<li><strong>N+1 세기</strong> — 쿠폰 페이지 조회 1번 + (페이지에 다음 페이지가 있으면) 개수 조회 1번 + 쿠폰마다 이벤트 조회 N번. 같은 이벤트를 여러 번 조회하면 1차 캐시가 일부를 줄여 주기도 합니다.</li>
+<li><strong><code>init</code> 에 &quot;종료 &gt; 지금&quot;</strong> — 끝난 이벤트를 만드는 테스트가 깨집니다. 예: <a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/test/kotlin/com/site/presentation/MyCouponApiTest.kt" target="_blank" rel="noopener">MyCouponApiTest</a> 는 <code>endAt = serviceNow().minusDays(2)</code> 인 이벤트를 만듭니다. 객체 불변식은 &quot;언제나 참&quot;이어야 한다는 4장의 구분을 다시 보세요.</li>
+</ol>
+<h3 id="5장-웹-계층과-예외-처리">5장. 웹 계층과 예외 처리 <a class="header-anchor" href="#5장-웹-계층과-예외-처리">#</a></h3>
+<ol>
+<li><strong><code>@Email</code> 만 붙이면</strong> — 잘못된 이메일로도 가입이 됩니다(201). 에러가 아니라 <strong>아무 일도 일어나지 않는다</strong>는 점이 위험합니다.</li>
+<li><strong>이벤트 상세 조회</strong> — <code>SuccessCode.GET_COUPON_EVENT_SUCCESS</code> 와 <code>ErrorCode.COUPON_EVENT_NOT_FOUND</code> 를 그대로 씁니다. 관리자용 응답(<code>CouponEventResponse</code>)을 재사용할지, 사용자에게 보이면 안 되는 필드가 있는지는 따로 판단해야 합니다.</li>
+<li><strong><code>Retry-After</code> 헤더</strong> — <code>GlobalExceptionHandler.handleServiceException</code> 에서 <code>LOCK_ACQUISITION_FAILED</code> 일 때 헤더를 붙이거나, <code>ErrorCode</code> 에 재시도 간격 정보를 추가합니다. 후자는 모든 에러 코드에 영향을 주니 범위를 따져 보세요.</li>
+</ol>
+<h3 id="6장-인증">6장. 인증 <a class="header-anchor" href="#6장-인증">#</a></h3>
+<ol>
+<li><strong>role 이 없는 토큰</strong> — 3절 코드 리뷰 연습 2번의 답을 보세요. 기대 결과는 401(<code>MALFORMED_TOKEN</code> 또는 <code>INVALID_TOKEN</code>)이 맞습니다. 테스트를 먼저 쓰면 지금 코드가 500 을 낸다는 것이 드러납니다.</li>
+<li><strong>동시 재발급 2개</strong> — Lua 덕분에 정확히 하나는 <code>CONSUMED</code>, 하나는 <code>REUSED</code> 입니다. GET → DEL 로 따로 했다면, 둘 다 GET 에서 주인을 읽은 뒤 각자 DEL 해서 <strong>둘 다 새 토큰을 받을</strong> 수 있습니다. 재사용 감지가 뚫립니다.</li>
+<li><strong>관리자별 담당 이벤트</strong> — Role 은 &quot;관리자인가&quot;만 판단하고, &quot;이 이벤트의 담당자인가&quot;는 별도 데이터(예: <code>coupon_event_manager(coupon_event_id, member_id)</code> 테이블)로 서비스에서 확인합니다. 거친 권한(Role)과 세밀한 권한(소유)을 나누는 것이 일반적입니다.</li>
+</ol>
+<h3 id="7장-동시성-제어">7장. 동시성 제어 <a class="header-anchor" href="#7장-동시성-제어">#</a></h3>
+<ol>
+<li><strong><code>REQUIRED</code> 였다면</strong> — 바깥 트랜잭션에 합류하므로 커밋은 바깥 메서드가 끝날 때입니다. 순서가 &quot;락 → 쓰기 → <strong>락 해제</strong> → (바깥이 끝나면) 커밋&quot;이 되어, 다음 요청이 커밋 전의 옛 수량을 읽습니다. 락을 걸었는데 Lost Update 가 납니다.</li>
+<li><strong>수량 조건 삭제</strong> — <code>원자적 UPDATE - 정확히 100장만 발급된다</code> 와 즉시 발급 입구의 <code>ATOMIC_UPDATE</code> 케이스가 깨집니다(초과 발급). 미리 읽은 값으로 하는 <code>checkIssuable</code> 은 동시에 들어온 요청을 막지 못합니다.</li>
+<li><strong>발급 취소</strong> — &quot;소진은 되돌아가지 않는다&quot;가 깨져서, 캐시의 소진 표시가 틀린 거절을 만듭니다. 서버마다 캐시가 따로 있으니 취소할 때 모든 서버에 알리거나(메시지 브로드캐스트), 소진 표시에 짧은 만료 시간을 두거나, 소진은 캐시하지 않는 방법이 있습니다. 각각 무엇을 잃는지 비교해 보세요.</li>
+<li><strong>쿠폰 사용을 비관적 락으로</strong> — 얻는 것: 충돌해도 예외 없이 기다렸다가 <code>USED</code> 를 보고 <code>ALREADY_USED_COUPON</code> 이 됩니다. 잃는 것: 충돌이 거의 없는데도 매번 행을 잠그고, 기다리는 동안 커넥션을 쥡니다.</li>
+</ol>
+<h3 id="8장-비동기와-신뢰성">8장. 비동기와 신뢰성 <a class="header-anchor" href="#8장-비동기와-신뢰성">#</a></h3>
+<ol>
+<li><strong><code>REQUIRES_NEW</code></strong> — Outbox 기록이 발급과 따로 먼저 커밋됩니다. 발급이 롤백돼도 Outbox 행이 남고, 그 트랜잭션의 커밋 이벤트로 알림까지 나갑니다. 테스트는 <code>outboxRepository.count()</code> 가 1 이 되어 실패합니다. <code>MANDATORY</code> 가 막으려던 바로 그 상황입니다.</li>
+<li><strong>발송 3초 지연</strong> — 발급 API 는 1초 안에 응답합니다. 알림은 커밋 후 다른 스레드에서 나가기 때문입니다. <a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/test/kotlin/com/site/domain/notification/NotificationOutboxTest.kt" target="_blank" rel="noopener">NotificationOutboxTest</a> 의 &quot;알림 발송이 느려도 발급 API 는 기다리지 않고 바로 응답한다&quot; 가 2초 지연으로 이것을 확인합니다.</li>
+<li><strong>lease 보다 긴 발송</strong> — 30초가 지나면 스케줄러가 같은 건을 다시 선점해 <strong>두 번 보냅니다.</strong> 막는 방법: HTTP 클라이언트 타임아웃을 lease 보다 짧게, lease 를 넉넉하게, 외부 API 가 지원하면 멱등 키를 보냅니다.</li>
+</ol>
+<h3 id="9장-redis-대기열">9장. Redis 대기열 <a class="header-anchor" href="#9장-redis-대기열">#</a></h3>
+<ol>
+<li><strong>워커가 죽은 상황 만들기</strong> — <code>claimNext</code> 를 직접 부르면서 <code>leaseUntilMillis</code> 를 <strong>이미 지난 시각</strong>(<code>clock.millis() - 1</code>)으로 줍니다. &quot;꺼냈는데 결과가 없고 lease 가 지난&quot; 상태가 됩니다. 또 회원 1번은 <code>issueWithAtomicUpdate</code> 로 미리 발급해 &quot;DB 발급은 끝났는데 Redis 결과 기록 전에 죽은&quot; 상황을 만듭니다. 장애를 일으키지 않고 <strong>장애가 남긴 흔적</strong>을 만드는 방식입니다.</li>
+<li><strong>남은 수량 얻기</strong> — 워커는 배치마다 <code>couponEvent.remainingQuantity</code> 를 압니다. 그 값을 Redis 키(예: <code>coupon-queue:{id}:remaining</code>)에 써 두면 상태 조회가 DB 없이 읽을 수 있습니다. 첫 배치 전에는 값이 없으니, 시작 후 바뀌지 않는 총수량을 상한으로 쓰는 방법도 있습니다.</li>
+<li><strong>마감 확인을 먼저</strong> — 이미 쿠폰을 받은 회원이 마감 뒤 다시 줄을 서면, 자기 결과(<code>ISSUED</code>) 대신 <code>Closed</code> → <code>COUPON_SOLD_OUT</code> 에러를 받습니다. <a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/test/kotlin/com/site/domain/coupon/queue/CouponQueueTest.kt" target="_blank" rel="noopener">CouponQueueTest</a> 의 &quot;이미 처리된 사람은 다시 와도 자기 결과를 돌려받는다&quot; 단언이 깨집니다. 스크립트의 확인 순서도 설계입니다.</li>
+<li><strong>워커 두 대</strong> — 수량은 지켜집니다. <code>claimNext</code> 가 원자적이라 한 회원을 두 워커가 가져가지 않고, <code>issueQueuedBatch</code> 의 행 잠금이 수량을 지킵니다. 순서는 느슨해집니다. 뒤 배치를 꺼낸 워커가 먼저 행 잠금을 잡으면, 소진 직전에 뒷사람이 앞사람보다 먼저 받을 수 있습니다.</li>
+</ol>
+<h3 id="10장-테스트">10장. 테스트 <a class="header-anchor" href="#10장-테스트">#</a></h3>
+<ol>
+<li><strong>경계값 <code>withData</code></strong> — 이런 모양입니다(<code>// 예시</code>).<figure class="code-block"><figcaption><span class="code-lang">Kotlin</span><button type="button" class="copy-button" aria-label="코드 복사">복사</button></figcaption><div class="highlight"><pre><span></span><code><span class="c1">// 예시</span>
+<span class="n">context</span><span class="p">(</span><span class="s">"종료 시각 경계"</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="n">withData</span><span class="p">(</span>
+<span class="w">        </span><span class="n">mapOf</span><span class="p">(</span>
+<span class="w">            </span><span class="s">"종료 1초 전 → 발급"</span><span class="w"> </span><span class="n">to</span><span class="w"> </span><span class="p">(</span><span class="n">endAt</span><span class="p">.</span><span class="na">minusSeconds</span><span class="p">(</span><span class="m">1</span><span class="p">)</span><span class="w"> </span><span class="n">to</span><span class="w"> </span><span class="kc">null</span><span class="p">),</span>
+<span class="w">            </span><span class="s">"종료 시각 → ENDED"</span><span class="w"> </span><span class="n">to</span><span class="w"> </span><span class="p">(</span><span class="n">endAt</span><span class="w"> </span><span class="n">to</span><span class="w"> </span><span class="n">ErrorCode</span><span class="p">.</span><span class="na">COUPON_EVENT_ENDED</span><span class="p">),</span>
+<span class="w">            </span><span class="s">"종료 1초 후 → ENDED"</span><span class="w"> </span><span class="n">to</span><span class="w"> </span><span class="p">(</span><span class="n">endAt</span><span class="p">.</span><span class="na">plusSeconds</span><span class="p">(</span><span class="m">1</span><span class="p">)</span><span class="w"> </span><span class="n">to</span><span class="w"> </span><span class="n">ErrorCode</span><span class="p">.</span><span class="na">COUPON_EVENT_ENDED</span><span class="p">),</span>
+<span class="w">        </span><span class="p">),</span>
+<span class="w">    </span><span class="p">)</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="p">(</span><span class="n">now</span><span class="p">,</span><span class="w"> </span><span class="n">expected</span><span class="p">)</span><span class="w"> </span><span class="o">-&gt;</span>
+<span class="w">        </span><span class="c1">// expected 가 null 이면 발급 성공, 아니면 그 에러 코드</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+</figure>
+</li>
+<li><strong>격리 모드 지우기</strong> — 기본값(<code>SingleInstance</code>)에서는 <code>Given</code> 에서 만든 객체를 모든 <code>Then</code> 이 공유합니다. 앞의 <code>Then</code> 이 객체를 바꾸면 다음 <code>Then</code> 이 바뀐 객체를 봅니다. 지금 테스트가 깨지지 않는다면, 그건 <code>Then</code> 들이 우연히 상태를 바꾸지 않기 때문입니다. 첫 <code>Then</code> 에서 <code>couponEvent.issue(startAt)</code> 을 부르고 두 번째 <code>Then</code> 에서 남은 수량이 2 라고 단언하는 테스트를 만들어 차이를 확인해 보세요.</li>
+<li><strong>출발 신호 없애기</strong> — 32개 스레드가 일을 받는 대로 시작하므로 여전히 겹치긴 하지만, 앞쪽 몇 개는 다른 작업이 제출되기 전에 끝나 버립니다. 여러 번 돌리면 결과가 들쭉날쭉해집니다. 동시성 테스트는 &quot;가끔 실패&quot;가 가장 나쁩니다. 그래서 겹침을 최대로 만드는 장치를 둡니다.</li>
+</ol>
+<h3 id="11장-관측과-부하-테스트">11장. 관측과 부하 테스트 <a class="header-anchor" href="#11장-관측과-부하-테스트">#</a></h3>
+<ol>
+<li><strong>카운터에 이벤트 ID 태그</strong> — 카운터 시계열은 서버가 재시작될 때까지 남습니다. 이벤트가 생길 때마다 시계열이 늘어 끝없이 쌓입니다. 대기열 크기 게이지는 <code>MultiGauge</code> 가 <strong>지금 진행 중인 이벤트만</strong> 덮어쓰고 끝난 이벤트는 지우므로 개수가 유지됩니다. &quot;ID 를 태그로 써도 되나&quot;는 동시에 살아 있는 개수로 판단합니다.</li>
+<li><strong>Grafana 관찰</strong> — 500명 즉시 발급에서 DB 커넥션 대기와 Tomcat 스레드가 언제 올라갔다 내려오는지 보세요. 실행이 1~2초 만에 끝나서 1초 간격 표본으로는 최대치를 놓칠 수 있다는 점도 확인해 보세요.</li>
+<li><strong>즉시 발급 vs 대기열</strong> — 즉시 발급이 빠른 예: 1,000장 · 5,000명에서 2.27s vs 5.59s (대기열은 줄 서기 몰림 + 조회 간격만큼 결과를 늦게 안다). 비슷한 예: 1,000장 · 2,000명에서 1.92s vs 1.86s. 그러나 즉시 발급은 그동안 DB 커넥션 대기가 110 까지 쌓였고 대기열은 0 이었습니다. 빠르기만 보지 말고 <strong>무엇을 대가로 냈는지</strong> 같이 말하는 연습을 하세요.</li>
+</ol>
+<h2 id="마치며">마치며 <a class="header-anchor" href="#마치며">#</a></h2>
+<p>이 교재의 코드는 처음부터 이 모습이 아니었습니다. 락 없는 발급에서 시작해 초과 발급을 테스트로 재현하고, 네 가지 방식을 비교하고, 알림 유실을 Outbox 로 막고, 부하 테스트에서 찾은 병목을 하나씩 고쳤습니다. 그 과정이 <code>git log</code> 와 PR 에 남아 있습니다.</p>
+<p>다음 기능을 만들 때도 같은 순서를 따라 보세요.</p>
+<ol>
+<li>문제를 테스트나 측정으로 <strong>재현</strong>한다.</li>
+<li>방법을 둘 이상 놓고 <strong>대가</strong>를 비교한다.</li>
+<li>고른 이유를 코드 주석과 PR 에 <strong>남긴다</strong>.</li>
+<li>고친 뒤 같은 조건으로 <strong>다시 잰다</strong>.</li>
+</ol>
+<p>처음으로: <a href="index.html">교재 목차</a></p>
+
+</article>
+<p class="source-link"><a href="https://github.com/RosieOh/Kopring_Core/blob/main/docs/12-next-steps-and-exercises.md" target="_blank" rel="noopener">이 장의 원본 Markdown 보기</a></p>
+<nav class="pager" aria-label="장 이동"><a class="pager-prev" href="11-observability-and-load-test.html"><span>이전</span>11장. 관측과 부하 테스트</a><a class="pager-next" href="13-virtual-threads-and-backpressure.html"><span>다음</span>13장. 심화: 가상 스레드와 몰림 대응</a></nav>
+</main>
+<nav class="page-toc" aria-label="이 장의 목차"><p class="page-toc-title">이 장에서</p><ol><li class="toc-level-2"><a href="#1-다음에-공부할-것">1. 다음에 공부할 것</a></li>
+<li class="toc-level-3"><a href="#kotlin">Kotlin</a></li>
+<li class="toc-level-3"><a href="#spring-과-운영">Spring 과 운영</a></li>
+<li class="toc-level-3"><a href="#테스트">테스트</a></li>
+<li class="toc-level-2"><a href="#2-이-저장소에서-해볼-확장-과제">2. 이 저장소에서 해볼 확장 과제</a></li>
+<li class="toc-level-2"><a href="#3-코드-리뷰-연습--이-코드의-약점-찾기">3. 코드 리뷰 연습 — 이 코드의 약점 찾기</a></li>
+<li class="toc-level-2"><a href="#4-연습-문제-힌트">4. 연습 문제 힌트</a></li>
+<li class="toc-level-3"><a href="#1장-kotlin-기초">1장. Kotlin 기초</a></li>
+<li class="toc-level-3"><a href="#2장-스프링이-kotlin-을-만나면">2장. 스프링이 Kotlin 을 만나면</a></li>
+<li class="toc-level-3"><a href="#3장-프로젝트-구조와-계층">3장. 프로젝트 구조와 계층</a></li>
+<li class="toc-level-3"><a href="#4장-jpa-엔티티를-kotlin-으로">4장. JPA 엔티티를 Kotlin 으로</a></li>
+<li class="toc-level-3"><a href="#5장-웹-계층과-예외-처리">5장. 웹 계층과 예외 처리</a></li>
+<li class="toc-level-3"><a href="#6장-인증">6장. 인증</a></li>
+<li class="toc-level-3"><a href="#7장-동시성-제어">7장. 동시성 제어</a></li>
+<li class="toc-level-3"><a href="#8장-비동기와-신뢰성">8장. 비동기와 신뢰성</a></li>
+<li class="toc-level-3"><a href="#9장-redis-대기열">9장. Redis 대기열</a></li>
+<li class="toc-level-3"><a href="#10장-테스트">10장. 테스트</a></li>
+<li class="toc-level-3"><a href="#11장-관측과-부하-테스트">11장. 관측과 부하 테스트</a></li>
+<li class="toc-level-2"><a href="#마치며">마치며</a></li></ol></nav>
+</div>
+</body>
+</html>

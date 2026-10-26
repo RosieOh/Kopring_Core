@@ -1,0 +1,422 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>3장. 프로젝트 구조와 계층 — 코프링 교재</title>
+<meta name="description" content="선착순 쿠폰 코드로 배우는 Kotlin + Spring Boot">
+<script>try{var t=localStorage.getItem("book-theme");if(t)document.documentElement.dataset.theme=t;}catch(e){}</script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+<link rel="stylesheet" href="assets/book.css">
+<link rel="stylesheet" href="assets/highlight.css">
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11.4.1/dist/mermaid.min.js" defer></script>
+<script src="assets/book.js" defer></script>
+</head>
+<body>
+<a class="skip-link" href="#content">본문으로 건너뛰기</a>
+<header class="topbar">
+  <button type="button" class="menu-button" aria-label="장 목록 열기" aria-expanded="false" aria-controls="sidebar">목차</button>
+  <a class="topbar-title" href="index.html">코프링 교재</a>
+  <button type="button" class="theme-button" aria-label="밝은 화면과 어두운 화면 바꾸기">화면</button>
+</header>
+<div class="layout">
+<aside class="sidebar" id="sidebar">
+  <a class="sidebar-title" href="index.html">코프링 교재<small>선착순 쿠폰으로 배우는 Kotlin + Spring Boot</small></a>
+  <nav aria-label="장 목록"><ol class="chapter-list">
+<li><a href="index.html">처음에 — 읽는 법과 목차</a></li>
+<li><a href="01-kotlin-basics.html">1장. Kotlin 기초</a></li>
+<li><a href="02-spring-meets-kotlin.html">2장. 스프링이 Kotlin 을 만나면</a></li>
+<li><a href="03-architecture.html" aria-current="page">3장. 프로젝트 구조와 계층</a></li>
+<li><a href="04-jpa-with-kotlin.html">4장. JPA 엔티티를 Kotlin 으로</a></li>
+<li><a href="05-web-and-errors.html">5장. 웹 계층과 예외 처리</a></li>
+<li><a href="06-auth.html">6장. 인증</a></li>
+<li><a href="07-concurrency.html">7장. 동시성 제어</a></li>
+<li><a href="08-async-and-reliability.html">8장. 비동기와 신뢰성</a></li>
+<li><a href="09-redis-queue.html">9장. Redis 대기열</a></li>
+<li><a href="10-testing.html">10장. 테스트</a></li>
+<li><a href="11-observability-and-load-test.html">11장. 관측과 부하 테스트</a></li>
+<li><a href="12-next-steps-and-exercises.html">12장. 다음 공부와 연습 문제</a></li>
+<li><a href="13-virtual-threads-and-backpressure.html">13장. 심화: 가상 스레드와 몰림 대응</a></li>
+  </ol></nav>
+</aside>
+<main id="content" class="content">
+<article class="markdown">
+<h1 id="3장-프로젝트-구조와-계층">3장. 프로젝트 구조와 계층 <a class="header-anchor" href="#3장-프로젝트-구조와-계층">#</a></h1>
+<p><strong>한 줄 요약</strong>: 비즈니스 규칙(domain)은 Redis·JWT·알림톡 같은 기술을 모르게 하고, 기술 쪽이 domain 의 인터페이스를 구현하게 합니다. 이 방향을 테스트(ArchUnit)로 강제합니다.</p>
+<h2 id="1-왜-계층을-나누나">1. 왜 계층을 나누나 <a class="header-anchor" href="#1-왜-계층을-나누나">#</a></h2>
+<p>코드를 &quot;무엇을 하느냐&quot;와 &quot;어떻게 하느냐&quot;로 나누면 바꿀 때 덜 아픕니다.</p>
+<ul>
+<li>&quot;소진되면 더 발급하지 않는다&quot;는 <strong>규칙</strong>입니다. Redis 를 쓰든 다른 저장소를 쓰든 같아야 합니다.</li>
+<li>&quot;Redis ZSET 에 줄을 세운다&quot;는 <strong>기술</strong>입니다. 나중에 Kafka 로 바꿀 수도 있습니다.</li>
+</ul>
+<p>둘이 섞여 있으면, 기술을 바꿀 때 규칙 코드까지 고쳐야 하고, 규칙을 테스트하려고 Redis 를 띄워야 합니다.</p>
+<h2 id="2-네-개의-패키지">2. 네 개의 패키지 <a class="header-anchor" href="#2-네-개의-패키지">#</a></h2>
+<figure class="diagram"><pre class="mermaid" data-source="flowchart LR
+    P[&quot;presentation&lt;br/&gt;컨트롤러·DTO·SSE&quot;] --&gt; D[&quot;domain&lt;br/&gt;엔티티·서비스·포트&quot;]
+    I[&quot;infrastructure&lt;br/&gt;Redis·JWT·알림톡·보안&quot;] --&gt; D
+    P --&gt; C[&quot;independent&lt;br/&gt;에러 코드·응답·Clock·락 애너테이션&quot;]
+    D --&gt; C
+    I --&gt; C
+">flowchart LR
+    P[&quot;presentation&lt;br/&gt;컨트롤러·DTO·SSE&quot;] --&gt; D[&quot;domain&lt;br/&gt;엔티티·서비스·포트&quot;]
+    I[&quot;infrastructure&lt;br/&gt;Redis·JWT·알림톡·보안&quot;] --&gt; D
+    P --&gt; C[&quot;independent&lt;br/&gt;에러 코드·응답·Clock·락 애너테이션&quot;]
+    D --&gt; C
+    I --&gt; C
+</pre></figure>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>패키지</th>
+<th>들어 있는 것</th>
+<th>알아도 되는 것</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>presentation</code></td>
+<td>컨트롤러, 요청·응답 DTO, SSE 스트림</td>
+<td>domain, independent</td>
+</tr>
+<tr>
+<td><code>domain</code></td>
+<td>엔티티, 리포지토리, 서비스, <strong>포트(인터페이스)</strong></td>
+<td>independent 만</td>
+</tr>
+<tr>
+<td><code>infrastructure</code></td>
+<td>포트를 구현하는 어댑터, Spring 설정 (보안, 비동기, Swagger)</td>
+<td>domain, independent</td>
+</tr>
+<tr>
+<td><code>independent</code></td>
+<td>에러 코드, 공통 응답, Clock, <code>@DistributedLock</code> 애너테이션</td>
+<td>아무것도</td>
+</tr>
+</tbody>
+</table></div>
+<p>화살표는 &quot;import 한다&quot;는 뜻입니다. <strong>domain 에서 나가는 화살표는 independent 하나뿐</strong>입니다.</p>
+<h2 id="3-포트와-어댑터--의존-방향-뒤집기">3. 포트와 어댑터 — 의존 방향 뒤집기 <a class="header-anchor" href="#3-포트와-어댑터--의존-방향-뒤집기">#</a></h2>
+<p>domain 은 Redis 가 필요합니다. 그런데 Redis 를 import 하면 안 됩니다. 어떻게 할까요?</p>
+<p><strong>domain 이 &quot;이런 기능이 필요하다&quot;는 인터페이스(포트)를 정하고, infrastructure 가 그것을 구현(어댑터)합니다.</strong> Spring 이 실행할 때 구현을 찾아 넣어 줍니다.</p>
+<figure class="diagram"><pre class="mermaid" data-source="flowchart LR
+    S[&quot;CouponQueueService&lt;br/&gt;(domain)&quot;] --&gt;|사용| Port[&quot;CouponQueueStore&lt;br/&gt;(domain 의 인터페이스)&quot;]
+    A[&quot;RedisCouponQueueStore&lt;br/&gt;(infrastructure)&quot;] -.-&gt;|구현| Port
+">flowchart LR
+    S[&quot;CouponQueueService&lt;br/&gt;(domain)&quot;] --&gt;|사용| Port[&quot;CouponQueueStore&lt;br/&gt;(domain 의 인터페이스)&quot;]
+    A[&quot;RedisCouponQueueStore&lt;br/&gt;(infrastructure)&quot;] -.-&gt;|구현| Port
+</pre></figure>
+<p>코드의 import 는 <code>RedisCouponQueueStore → CouponQueueStore</code> 방향입니다. 실행 흐름(서비스가 Redis 를 부른다)과 <strong>의존 방향이 반대</strong>입니다. 그래서 이 구조를 &quot;의존성 역전&quot;이라고 부릅니다.</p>
+<h3 id="포트--domain-이-정한-계약">포트 — domain 이 정한 계약 <a class="header-anchor" href="#포트--domain-이-정한-계약">#</a></h3>
+<p><a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/main/kotlin/com/site/domain/coupon/queue/port/CouponQueueStore.kt#L5-L29" target="_blank" rel="noopener">CouponQueueStore.kt</a></p>
+<figure class="code-block"><figcaption><span class="code-lang">Kotlin</span><button type="button" class="copy-button" aria-label="코드 복사">복사</button></figcaption><div class="highlight"><pre><span></span><code><span class="cm">/**</span>
+<span class="cm"> * 선착순 대기열 저장소 포트. 어떤 연산이 "원자적"이어야 하는지가 이 인터페이스의 계약이다.</span>
+<span class="cm"> *</span>
+<span class="cm"> * 회원은 대기(waiting) → 처리 중(processing) → 결과(result) 순서로 옮겨 간다.</span>
+<span class="cm"> * 처리 중에는 lease(만료 시각)가 붙어서, 처리하던 워커가 죽으면 lease 가 지난 뒤 다른 워커가 다시 가져간다.</span>
+<span class="cm"> */</span>
+<span class="kd">interface</span><span class="w"> </span><span class="nc">CouponQueueStore</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="cm">/** 결과 확인 → 처리 중 확인 → 마감 확인 → 대기 중 확인 → 순번 발급 → 추가를 원자적으로 한다. */</span>
+<span class="w">    </span><span class="kd">fun</span><span class="w"> </span><span class="nf">enqueue</span><span class="p">(</span><span class="n">couponEventId</span><span class="p">:</span><span class="w"> </span><span class="kt">Long</span><span class="p">,</span><span class="w"> </span><span class="n">memberId</span><span class="p">:</span><span class="w"> </span><span class="kt">Long</span><span class="p">):</span><span class="w"> </span><span class="n">EnqueueResult</span>
+
+<span class="w">    </span><span class="kd">fun</span><span class="w"> </span><span class="nf">activate</span><span class="p">(</span><span class="n">couponEventId</span><span class="p">:</span><span class="w"> </span><span class="kt">Long</span><span class="p">)</span>
+
+<span class="w">    </span><span class="kd">fun</span><span class="w"> </span><span class="nf">activeEventIds</span><span class="p">():</span><span class="w"> </span><span class="n">Set</span><span class="o">&lt;</span><span class="kt">Long</span><span class="o">&gt;</span>
+
+<span class="w">    </span><span class="kd">fun</span><span class="w"> </span><span class="nf">deactivate</span><span class="p">(</span><span class="n">couponEventId</span><span class="p">:</span><span class="w"> </span><span class="kt">Long</span><span class="p">)</span>
+
+<span class="w">    </span><span class="cm">/** 대기·처리 중이 모두 비어 있으면 순회 대상에서 뺀다. 빼는 사이에 누가 들어왔다면 다시 넣는다. */</span>
+<span class="w">    </span><span class="kd">fun</span><span class="w"> </span><span class="nf">deactivateIfEmpty</span><span class="p">(</span><span class="n">couponEventId</span><span class="p">:</span><span class="w"> </span><span class="kt">Long</span><span class="p">)</span>
+
+<span class="w">    </span><span class="cm">/** 앞에서부터 count 명을 꺼내 처리 중으로 옮긴다. (원자적 — 한 명을 두 워커가 가져가지 않는다) */</span>
+<span class="w">    </span><span class="kd">fun</span><span class="w"> </span><span class="nf">claimNext</span><span class="p">(</span>
+<span class="w">        </span><span class="n">couponEventId</span><span class="p">:</span><span class="w"> </span><span class="kt">Long</span><span class="p">,</span>
+<span class="w">        </span><span class="n">count</span><span class="p">:</span><span class="w"> </span><span class="kt">Long</span><span class="p">,</span>
+<span class="w">        </span><span class="n">leaseUntilMillis</span><span class="p">:</span><span class="w"> </span><span class="kt">Long</span><span class="p">,</span>
+<span class="w">    </span><span class="p">):</span><span class="w"> </span><span class="n">List</span><span class="o">&lt;</span><span class="kt">Long</span><span class="o">&gt;</span>
+</code></pre></div>
+</figure>
+<p>인터페이스에는 Redis 단어가 하나도 없습니다. 대신 <strong>&quot;무엇이 원자적이어야 하는가&quot;</strong> 가 계약으로 적혀 있습니다. 어떤 저장소로 바꾸든 이 약속은 지켜야 합니다.</p>
+<h3 id="어댑터--기술로-구현">어댑터 — 기술로 구현 <a class="header-anchor" href="#어댑터--기술로-구현">#</a></h3>
+<p><a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/main/kotlin/com/site/infrastructure/redis/queue/RedisCouponQueueStore.kt#L26-L30" target="_blank" rel="noopener">RedisCouponQueueStore.kt</a></p>
+<figure class="code-block"><figcaption><span class="code-lang">Kotlin</span><button type="button" class="copy-button" aria-label="코드 복사">복사</button></figcaption><div class="highlight"><pre><span></span><code><span class="nd">@Repository</span>
+<span class="kd">class</span><span class="w"> </span><span class="nc">RedisCouponQueueStore</span><span class="p">(</span>
+<span class="w">    </span><span class="kd">private</span><span class="w"> </span><span class="kd">val</span><span class="w"> </span><span class="nv">redisTemplate</span><span class="p">:</span><span class="w"> </span><span class="n">StringRedisTemplate</span><span class="p">,</span>
+<span class="w">    </span><span class="kd">private</span><span class="w"> </span><span class="kd">val</span><span class="w"> </span><span class="nv">properties</span><span class="p">:</span><span class="w"> </span><span class="n">CouponQueueProperties</span><span class="p">,</span>
+<span class="p">)</span><span class="w"> </span><span class="p">:</span><span class="w"> </span><span class="n">CouponQueueStore</span><span class="w"> </span><span class="p">{</span>
+</code></pre></div>
+</figure>
+<p>구현 내용은 <a href="09-redis-queue.html">9장</a>에서 봅니다.</p>
+<h3 id="이-프로젝트의-포트-전체">이 프로젝트의 포트 전체 <a class="header-anchor" href="#이-프로젝트의-포트-전체">#</a></h3>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>포트 (domain)</th>
+<th>어댑터 (infrastructure)</th>
+<th>무엇을 감추나</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/main/kotlin/com/site/domain/coupon/queue/port/CouponQueueStore.kt" target="_blank" rel="noopener">CouponQueueStore</a></td>
+<td><a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/main/kotlin/com/site/infrastructure/redis/queue/RedisCouponQueueStore.kt" target="_blank" rel="noopener">RedisCouponQueueStore</a></td>
+<td>Redis ZSET·HASH·Lua</td>
+</tr>
+<tr>
+<td><a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/main/kotlin/com/site/domain/notification/port/AlimtalkSender.kt" target="_blank" rel="noopener">AlimtalkSender</a></td>
+<td><a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/main/kotlin/com/site/infrastructure/biztalk/SolapiAlimtalkSender.kt" target="_blank" rel="noopener">SolapiAlimtalkSender</a>, <a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/main/kotlin/com/site/infrastructure/biztalk/LoggingAlimtalkSender.kt" target="_blank" rel="noopener">LoggingAlimtalkSender</a></td>
+<td>Solapi SDK, 실제 발송 여부</td>
+</tr>
+<tr>
+<td><a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/main/kotlin/com/site/domain/auth/port/TokenIssuer.kt" target="_blank" rel="noopener">TokenIssuer</a></td>
+<td><a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/main/kotlin/com/site/infrastructure/security/jwt/JwtTokenProvider.kt" target="_blank" rel="noopener">JwtTokenProvider</a></td>
+<td>JWT 형식, 서명 키</td>
+</tr>
+<tr>
+<td><a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/main/kotlin/com/site/domain/auth/port/RefreshTokenStore.kt" target="_blank" rel="noopener">RefreshTokenStore</a></td>
+<td><a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/main/kotlin/com/site/infrastructure/redis/RedisRefreshTokenStore.kt" target="_blank" rel="noopener">RedisRefreshTokenStore</a></td>
+<td>Redis 키 구조, Lua</td>
+</tr>
+<tr>
+<td><a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/main/kotlin/com/site/domain/auth/port/AccessTokenBlacklist.kt" target="_blank" rel="noopener">AccessTokenBlacklist</a></td>
+<td><a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/main/kotlin/com/site/infrastructure/redis/RedisAccessTokenBlacklist.kt" target="_blank" rel="noopener">RedisAccessTokenBlacklist</a></td>
+<td>Redis TTL</td>
+</tr>
+</tbody>
+</table></div>
+<p><a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/main/kotlin/com/site/domain/auth/service/AuthService.kt#L20-L31" target="_blank" rel="noopener">AuthService.kt</a> 의 첫 줄 주석이 이 구조의 효과를 요약합니다.</p>
+<figure class="code-block"><figcaption><span class="code-lang">Kotlin</span><button type="button" class="copy-button" aria-label="코드 복사">복사</button></figcaption><div class="highlight"><pre><span></span><code><span class="cm">/**</span>
+<span class="cm"> * 토큰 발급·저장·블랙리스트는 모두 포트(인터페이스)로만 다룬다. JWT 인지, Redis 에 저장하는지는 이 클래스가 모른다.</span>
+<span class="cm"> */</span>
+<span class="nd">@Service</span>
+<span class="nd">@Transactional</span><span class="p">(</span><span class="n">readOnly</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="kc">true</span><span class="p">)</span>
+<span class="kd">class</span><span class="w"> </span><span class="nc">AuthService</span><span class="p">(</span>
+<span class="w">    </span><span class="kd">private</span><span class="w"> </span><span class="kd">val</span><span class="w"> </span><span class="nv">memberRepository</span><span class="p">:</span><span class="w"> </span><span class="n">MemberRepository</span><span class="p">,</span>
+<span class="w">    </span><span class="kd">private</span><span class="w"> </span><span class="kd">val</span><span class="w"> </span><span class="nv">passwordEncoder</span><span class="p">:</span><span class="w"> </span><span class="n">PasswordEncoder</span><span class="p">,</span>
+<span class="w">    </span><span class="kd">private</span><span class="w"> </span><span class="kd">val</span><span class="w"> </span><span class="nv">tokenIssuer</span><span class="p">:</span><span class="w"> </span><span class="n">TokenIssuer</span><span class="p">,</span>
+<span class="w">    </span><span class="kd">private</span><span class="w"> </span><span class="kd">val</span><span class="w"> </span><span class="nv">refreshTokenStore</span><span class="p">:</span><span class="w"> </span><span class="n">RefreshTokenStore</span><span class="p">,</span>
+<span class="w">    </span><span class="kd">private</span><span class="w"> </span><span class="kd">val</span><span class="w"> </span><span class="nv">accessTokenBlacklist</span><span class="p">:</span><span class="w"> </span><span class="n">AccessTokenBlacklist</span><span class="p">,</span>
+<span class="p">)</span><span class="w"> </span><span class="p">{</span>
+</code></pre></div>
+</figure>
+<h3 id="구현을-바꿔-끼우기">구현을 바꿔 끼우기 <a class="header-anchor" href="#구현을-바꿔-끼우기">#</a></h3>
+<p>포트 덕분에 같은 서비스 코드에 다른 구현을 넣을 수 있습니다.</p>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>상황</th>
+<th><code>AlimtalkSender</code> 구현</th>
+<th>어떻게 고르나</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>운영</td>
+<td><code>SolapiAlimtalkSender</code> (실제 발송)</td>
+<td><code>biztalk.enabled=true</code></td>
+</tr>
+<tr>
+<td>로컬</td>
+<td><code>LoggingAlimtalkSender</code> (로그만)</td>
+<td>설정 없음 (기본)</td>
+</tr>
+<tr>
+<td>통합 테스트</td>
+<td><code>FakeAlimtalkSender</code> (받은 메시지 기록, 실패 흉내)</td>
+<td><code>@Primary</code> + <code>@TestComponent</code></td>
+</tr>
+</tbody>
+</table></div>
+<h2 id="4-실용적인-타협--jpa-는-domain-에-있다">4. 실용적인 타협 — JPA 는 domain 에 있다 <a class="header-anchor" href="#4-실용적인-타협--jpa-는-domain-에-있다">#</a></h2>
+<p>엄격하게 하면 엔티티에서 <code>@Entity</code> 같은 JPA 애너테이션도 빼야 합니다. 이 프로젝트는 그렇게까지 하지 않았습니다.</p>
+<ul>
+<li>엔티티와 Spring Data 리포지토리 인터페이스는 domain 에 둔다.</li>
+<li>포트로 감추는 것은 <strong>&quot;바꿀 가능성이 있거나, 테스트에서 가짜로 바꿔야 하는&quot; 기술</strong>(Redis, JWT, 외부 API)이다.</li>
+<li>JPA 를 다른 영속성 기술로 바꿀 일은 이 프로젝트에서 현실적으로 없다. 대신 엔티티 매핑을 감싸는 별도 모델을 두면 코드가 두 배가 된다.</li>
+</ul>
+<p>규칙은 &quot;domain 이 infrastructure·presentation 패키지를 import 하지 않는다&quot;입니다. 프레임워크(Spring, JPA, Micrometer) 자체는 domain 에서 씁니다. <a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/main/kotlin/com/site/domain/coupon/service/CouponIssueMetrics.kt" target="_blank" rel="noopener">CouponIssueMetrics.kt</a> 주석: &quot;Micrometer 는 지표용 파사드(로깅의 SLF4J 같은 것)라서 domain 에서 직접 써도 특정 모니터링 시스템에 묶이지 않는다.&quot;</p>
+<h2 id="5-independent--모두가-쓰는-것">5. independent — 모두가 쓰는 것 <a class="header-anchor" href="#5-independent--모두가-쓰는-것">#</a></h2>
+<p><a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/main/kotlin/com/site/independent/config/AsyncExecutors.kt" target="_blank" rel="noopener">AsyncExecutors.kt</a></p>
+<figure class="code-block"><figcaption><span class="code-lang">Kotlin</span><button type="button" class="copy-button" aria-label="코드 복사">복사</button></figcaption><div class="highlight"><pre><span></span><code><span class="cm">/**</span>
+<span class="cm"> * 비동기 실행기 빈 이름. @Async("...") 에 쓰는 이름을 계층 공통 위치에 둬서,</span>
+<span class="cm"> * domain 이 실행기를 만드는 infrastructure 설정 클래스를 import 하지 않아도 되게 한다.</span>
+<span class="cm"> */</span>
+<span class="kd">object</span><span class="w"> </span><span class="nc">AsyncExecutors</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kd">const</span><span class="w"> </span><span class="kd">val</span><span class="w"> </span><span class="nv">NOTIFICATION</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="s">"notificationExecutor"</span>
+<span class="p">}</span>
+</code></pre></div>
+</figure>
+<p>domain 의 알림 리스너는 <code>@Async(AsyncExecutors.NOTIFICATION)</code> 으로 실행기 이름만 압니다. 스레드 풀을 만드는 코드(<a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/main/kotlin/com/site/infrastructure/async/AsyncConfig.kt" target="_blank" rel="noopener">AsyncConfig.kt</a>)는 infrastructure 에 있습니다.</p>
+<p>같은 이유로 <code>@DistributedLock</code> <strong>애너테이션</strong>은 independent 에 있고, 그것을 처리하는 <strong>Aspect</strong>(Redisson 사용)는 infrastructure 에 있습니다. domain 의 서비스는 애너테이션만 붙이고 Redis 를 모릅니다.</p>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>independent 에 있는 것</th>
+<th>왜 여기</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>ErrorCode</code>, <code>ServiceException</code></td>
+<td>domain 이 던지고 presentation·infrastructure 가 응답으로 바꾼다</td>
+</tr>
+<tr>
+<td><code>SuccessResponse</code>, <code>PageResponse</code></td>
+<td>모든 컨트롤러의 응답 형식</td>
+</tr>
+<tr>
+<td><code>ClockConfig</code></td>
+<td>모든 계층이 같은 시각 기준을 쓴다</td>
+</tr>
+<tr>
+<td><code>DistributedLock</code> (애너테이션)</td>
+<td>domain 이 붙이고 infrastructure 가 처리한다</td>
+</tr>
+<tr>
+<td><code>maskPhoneNumber</code></td>
+<td>로그를 남기는 모든 곳</td>
+</tr>
+</tbody>
+</table></div>
+<h2 id="6-계층-사이의-데이터--dto-와-command">6. 계층 사이의 데이터 — DTO 와 Command <a class="header-anchor" href="#6-계층-사이의-데이터--dto-와-command">#</a></h2>
+<p>컨트롤러가 받은 요청 DTO 를 서비스에 그대로 넘기면 domain 이 presentation 의 클래스를 import 하게 됩니다.</p>
+<p><a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/main/kotlin/com/site/domain/coupon/service/CouponEventCommand.kt#L9-L26" target="_blank" rel="noopener">CouponEventCommand.kt</a></p>
+<figure class="code-block"><figcaption><span class="code-lang">Kotlin</span><button type="button" class="copy-button" aria-label="코드 복사">복사</button></figcaption><div class="highlight"><pre><span></span><code><span class="cm">/**</span>
+<span class="cm"> * 서비스가 받는 입력. 컨트롤러의 요청 DTO 를 그대로 받으면 domain 이 presentation 에 의존하게 되므로</span>
+<span class="cm"> * domain 쪽에 입력 모델을 따로 두고, 컨트롤러가 DTO → Command 로 변환해서 넘긴다.</span>
+<span class="cm"> */</span>
+<span class="kd">data</span><span class="w"> </span><span class="kd">class</span><span class="w"> </span><span class="nc">CouponEventCommand</span><span class="p">(</span>
+<span class="w">    </span><span class="kd">val</span><span class="w"> </span><span class="nv">name</span><span class="p">:</span><span class="w"> </span><span class="kt">String</span><span class="p">,</span>
+<span class="w">    </span><span class="kd">val</span><span class="w"> </span><span class="nv">discountType</span><span class="p">:</span><span class="w"> </span><span class="n">DiscountType</span><span class="p">,</span>
+<span class="w">    </span><span class="kd">val</span><span class="w"> </span><span class="nv">discountValue</span><span class="p">:</span><span class="w"> </span><span class="kt">Int</span><span class="p">,</span>
+<span class="w">    </span><span class="kd">val</span><span class="w"> </span><span class="nv">totalQuantity</span><span class="p">:</span><span class="w"> </span><span class="kt">Int</span><span class="p">,</span>
+<span class="w">    </span><span class="kd">val</span><span class="w"> </span><span class="nv">startAt</span><span class="p">:</span><span class="w"> </span><span class="n">LocalDateTime</span><span class="p">,</span>
+<span class="w">    </span><span class="kd">val</span><span class="w"> </span><span class="nv">endAt</span><span class="p">:</span><span class="w"> </span><span class="n">LocalDateTime</span><span class="p">,</span>
+<span class="w">    </span><span class="kd">val</span><span class="w"> </span><span class="nv">issueMode</span><span class="p">:</span><span class="w"> </span><span class="n">CouponIssueMode</span><span class="p">,</span>
+<span class="w">    </span><span class="kd">val</span><span class="w"> </span><span class="nv">couponValidityDays</span><span class="p">:</span><span class="w"> </span><span class="kt">Int</span><span class="p">,</span>
+<span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="kd">fun</span><span class="w"> </span><span class="nf">toDiscount</span><span class="p">():</span><span class="w"> </span><span class="n">Discount</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">Discount</span><span class="p">(</span><span class="n">type</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">discountType</span><span class="p">,</span><span class="w"> </span><span class="n">value</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">discountValue</span><span class="p">)</span>
+
+<span class="w">    </span><span class="kd">fun</span><span class="w"> </span><span class="nf">toPeriod</span><span class="p">():</span><span class="w"> </span><span class="n">EventPeriod</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">EventPeriod</span><span class="p">(</span><span class="n">startAt</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">startAt</span><span class="p">,</span><span class="w"> </span><span class="n">endAt</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="n">endAt</span><span class="p">)</span>
+<span class="p">}</span>
+</code></pre></div>
+</figure>
+<figure class="diagram"><pre class="mermaid" data-source="flowchart LR
+    R[&quot;CouponEventRequest&lt;br/&gt;(presentation, 검증 애너테이션)&quot;] --&gt;|&quot;toCommand()&quot;| C[&quot;CouponEventCommand&lt;br/&gt;(domain 입력)&quot;]
+    C --&gt; E[&quot;CouponEvent&lt;br/&gt;(domain 엔티티)&quot;]
+    E --&gt;|&quot;toResponse(now)&quot;| O[&quot;CouponEventResponse&lt;br/&gt;(presentation)&quot;]
+">flowchart LR
+    R[&quot;CouponEventRequest&lt;br/&gt;(presentation, 검증 애너테이션)&quot;] --&gt;|&quot;toCommand()&quot;| C[&quot;CouponEventCommand&lt;br/&gt;(domain 입력)&quot;]
+    C --&gt; E[&quot;CouponEvent&lt;br/&gt;(domain 엔티티)&quot;]
+    E --&gt;|&quot;toResponse(now)&quot;| O[&quot;CouponEventResponse&lt;br/&gt;(presentation)&quot;]
+</pre></figure>
+<p>변환 함수(<code>toCommand</code>, <code>toResponse</code>)는 모두 presentation 쪽에 확장 함수로 둡니다. 화살표가 presentation → domain 방향으로만 생기게 하려는 것입니다.</p>
+<h2 id="7-규칙을-테스트로-강제--archunit">7. 규칙을 테스트로 강제 — ArchUnit <a class="header-anchor" href="#7-규칙을-테스트로-강제--archunit">#</a></h2>
+<p>규칙은 문서에만 있으면 언젠가 깨집니다. 누군가 급하게 domain 에서 infrastructure 의 클래스(예: <code>RedisCouponQueueStore</code>)를 import 하면 CI 가 실패하게 했습니다.</p>
+<p><a href="https://github.com/RosieOh/Kopring_Core/blob/main/src/test/kotlin/com/site/architecture/LayerDependencyTest.kt" target="_blank" rel="noopener">LayerDependencyTest.kt</a></p>
+<figure class="code-block"><figcaption><span class="code-lang">Kotlin</span><button type="button" class="copy-button" aria-label="코드 복사">복사</button></figcaption><div class="highlight"><pre><span></span><code><span class="cm">/**</span>
+<span class="cm"> * 계층 의존 방향을 테스트로 강제한다. 규칙을 어기는 import 가 생기면 CI 에서 깨진다.</span>
+<span class="cm"> *</span>
+<span class="cm"> *   presentation ──▶ domain ◀── infrastructure</span>
+<span class="cm"> *          └──────────┴──────────────┴──▶ independent (계층 공통)</span>
+<span class="cm"> */</span>
+<span class="nd">@AnalyzeClasses</span><span class="p">(</span><span class="n">packages</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">[</span><span class="s">"com.site"</span><span class="o">]</span><span class="p">,</span><span class="w"> </span><span class="n">importOptions</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="o">[</span><span class="n">ImportOption</span><span class="p">.</span><span class="na">DoNotIncludeTests</span><span class="o">::</span><span class="n">class</span><span class="o">]</span><span class="p">)</span>
+<span class="kd">class</span><span class="w"> </span><span class="nc">LayerDependencyTest</span><span class="w"> </span><span class="p">{</span>
+
+<span class="w">    </span><span class="nd">@ArchTest</span>
+<span class="w">    </span><span class="kd">fun</span><span class="w"> </span><span class="err">`</span><span class="nf">domain</span><span class="w"> </span><span class="err">은</span><span class="w"> </span><span class="n">infrastructure</span><span class="w"> </span><span class="err">와</span><span class="w"> </span><span class="n">presentation</span><span class="w"> </span><span class="err">을</span><span class="w"> </span><span class="err">모른다`</span><span class="p">(</span><span class="n">classes</span><span class="p">:</span><span class="w"> </span><span class="n">JavaClasses</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">        </span><span class="n">noClasses</span><span class="p">().</span><span class="na">that</span><span class="p">().</span><span class="na">resideInAPackage</span><span class="p">(</span><span class="s">"com.site.domain.."</span><span class="p">)</span>
+<span class="w">            </span><span class="p">.</span><span class="na">should</span><span class="p">().</span><span class="na">dependOnClassesThat</span><span class="p">().</span><span class="na">resideInAnyPackage</span><span class="p">(</span><span class="s">"com.site.infrastructure.."</span><span class="p">,</span><span class="w"> </span><span class="s">"com.site.presentation.."</span><span class="p">)</span>
+<span class="w">            </span><span class="p">.</span><span class="na">because</span><span class="p">(</span><span class="s">"Redis·JWT·알림톡 같은 기술은 domain 의 포트(인터페이스)를 infrastructure 가 구현하는 방식으로만 연결한다"</span><span class="p">)</span>
+<span class="w">            </span><span class="p">.</span><span class="na">check</span><span class="p">(</span><span class="n">classes</span><span class="p">)</span>
+<span class="w">    </span><span class="p">}</span>
+</code></pre></div>
+</figure>
+<p>ArchUnit 은 컴파일된 클래스를 읽어 &quot;어느 클래스가 어느 클래스를 쓰는지&quot;를 검사합니다. 테스트 코드는 검사에서 뺐습니다(<code>DoNotIncludeTests</code>).</p>
+<p>이 규칙이 막는 것은 <strong>이 프로젝트의 패키지</strong>(<code>com.site.infrastructure</code>, <code>com.site.presentation</code>)뿐입니다. domain 에서 Redis 라이브러리(<code>org.springframework.data.redis...</code>)를 직접 써도 이 테스트는 통과합니다. 규칙 테스트는 적어 둔 것만 지킨다는 점을 기억하세요.</p>
+<h2 id="8-이-구조가-생긴-과정">8. 이 구조가 생긴 과정 <a class="header-anchor" href="#8-이-구조가-생긴-과정">#</a></h2>
+<p>처음부터 이렇지 않았습니다. 커밋 기록에 순서가 남아 있습니다.</p>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>커밋</th>
+<th>무엇을 했나</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>bd05b67</code></td>
+<td>domain 이 infrastructure 를 모르도록 포트·어댑터 구조로 의존 방향 반전</td>
+</tr>
+<tr>
+<td><code>d9347c7</code></td>
+<td>ArchUnit 으로 계층 의존 규칙 강제</td>
+</tr>
+<tr>
+<td><code>688e0c3</code></td>
+<td>다른 프로젝트 흔적·미사용 코드 제거, 학습용 발급 방식은 테스트 소스로 이동</td>
+</tr>
+</tbody>
+</table></div>
+<p>처음엔 domain 서비스가 infrastructure 의 클래스(Redis 대기열 리포지토리, <code>JwtTokenProvider</code>, 알림톡 발송기)를 직접 import 했습니다. 기술을 바꾸거나 테스트에서 가짜로 바꾸려면 서비스까지 고쳐야 하는 구조였고, 그래서 포트를 도입했습니다. (<code>bd05b67</code> 에서 domain 쪽 <code>import com.site.infrastructure...</code> 가 모두 사라졌습니다) <strong>처음부터 완벽한 구조를 만들기보다, 아픈 곳이 보일 때 나누는 것</strong>도 방법입니다.</p>
+<h2 id="흔한-실수">흔한 실수 <a class="header-anchor" href="#흔한-실수">#</a></h2>
+<div class="table-wrap"><table>
+<thead>
+<tr>
+<th>실수</th>
+<th>결과</th>
+<th>대신</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>domain 서비스에서 <code>StringRedisTemplate</code> 을 직접 쓴다</td>
+<td>규칙을 테스트하려면 Redis 가 필요해진다. ArchUnit 규칙은 <code>com.site.infrastructure</code> 패키지만 막아서 이것은 <strong>잡지 못한다</strong></td>
+<td>포트를 만들고 infrastructure 에서 구현. 리뷰로 막거나 규칙을 넓힌다</td>
+</tr>
+<tr>
+<td>요청 DTO 를 서비스 파라미터로 받는다</td>
+<td>domain → presentation 의존이 생긴다</td>
+<td>domain 에 Command 를 두고 변환</td>
+</tr>
+<tr>
+<td>필터 클래스에 <code>@Component</code> 를 붙인다</td>
+<td>Spring Boot 가 서블릿 필터로도 등록해 두 번 실행된다</td>
+<td><code>SecurityConfig</code> 에서 <code>new</code> 로 만들어 넣는다 (<a href="06-auth.html">6장</a>)</td>
+</tr>
+<tr>
+<td>포트에 기술 용어를 넣는다 (<code>zadd</code>, <code>hset</code>)</td>
+<td>인터페이스가 구현에 묶인다</td>
+<td>&quot;무엇을, 얼마나 원자적으로&quot;만 적는다</td>
+</tr>
+</tbody>
+</table></div>
+<h2 id="직접-해보기">직접 해보기 <a class="header-anchor" href="#직접-해보기">#</a></h2>
+<ol>
+<li><code>CouponQueueService</code> 의 생성자에 <code>private val redisCouponQueueStore: RedisCouponQueueStore</code> (infrastructure 클래스)를 추가하고 <code>./gradlew test --tests '*LayerDependencyTest*'</code> 의 실패 메시지를 읽어 보세요. 이번엔 <code>StringRedisTemplate</code> 을 받아 보세요. 테스트가 깨지나요? 왜 그런가요? (확인 후 되돌리세요)</li>
+<li><code>CouponQueueStore</code> 를 메모리(<code>ConcurrentHashMap</code>)로 구현한 <code>InMemoryCouponQueueStore</code> 를 설계해 보세요. 포트 주석의 &quot;원자적&quot; 약속을 지키려면 무엇이 필요한가요? (코드는 쓰지 않아도 됩니다)</li>
+<li><code>independent</code> 패키지에 있는 클래스 중, 실제로는 한 계층에서만 쓰는 것이 있는지 찾아보세요. 있다면 옮겨야 할까요?</li>
+</ol>
+<p>다음 장: <a href="04-jpa-with-kotlin.html">4장. JPA 엔티티를 Kotlin 으로</a></p>
+
+</article>
+<p class="source-link"><a href="https://github.com/RosieOh/Kopring_Core/blob/main/docs/03-architecture.md" target="_blank" rel="noopener">이 장의 원본 Markdown 보기</a></p>
+<nav class="pager" aria-label="장 이동"><a class="pager-prev" href="02-spring-meets-kotlin.html"><span>이전</span>2장. 스프링이 Kotlin 을 만나면</a><a class="pager-next" href="04-jpa-with-kotlin.html"><span>다음</span>4장. JPA 엔티티를 Kotlin 으로</a></nav>
+</main>
+<nav class="page-toc" aria-label="이 장의 목차"><p class="page-toc-title">이 장에서</p><ol><li class="toc-level-2"><a href="#1-왜-계층을-나누나">1. 왜 계층을 나누나</a></li>
+<li class="toc-level-2"><a href="#2-네-개의-패키지">2. 네 개의 패키지</a></li>
+<li class="toc-level-2"><a href="#3-포트와-어댑터--의존-방향-뒤집기">3. 포트와 어댑터 — 의존 방향 뒤집기</a></li>
+<li class="toc-level-3"><a href="#포트--domain-이-정한-계약">포트 — domain 이 정한 계약</a></li>
+<li class="toc-level-3"><a href="#어댑터--기술로-구현">어댑터 — 기술로 구현</a></li>
+<li class="toc-level-3"><a href="#이-프로젝트의-포트-전체">이 프로젝트의 포트 전체</a></li>
+<li class="toc-level-3"><a href="#구현을-바꿔-끼우기">구현을 바꿔 끼우기</a></li>
+<li class="toc-level-2"><a href="#4-실용적인-타협--jpa-는-domain-에-있다">4. 실용적인 타협 — JPA 는 domain 에 있다</a></li>
+<li class="toc-level-2"><a href="#5-independent--모두가-쓰는-것">5. independent — 모두가 쓰는 것</a></li>
+<li class="toc-level-2"><a href="#6-계층-사이의-데이터--dto-와-command">6. 계층 사이의 데이터 — DTO 와 Command</a></li>
+<li class="toc-level-2"><a href="#7-규칙을-테스트로-강제--archunit">7. 규칙을 테스트로 강제 — ArchUnit</a></li>
+<li class="toc-level-2"><a href="#8-이-구조가-생긴-과정">8. 이 구조가 생긴 과정</a></li>
+<li class="toc-level-2"><a href="#흔한-실수">흔한 실수</a></li>
+<li class="toc-level-2"><a href="#직접-해보기">직접 해보기</a></li></ol></nav>
+</div>
+</body>
+</html>
