@@ -20,6 +20,11 @@
       "description": "알림 Outbox 스케줄러 설정"
     },
     {
+      "name": "coupon.issue",
+      "type": "com.site.domain.coupon.service.CouponIssueProperties",
+      "description": "선착순 쿠폰 발급 설정"
+    },
+    {
       "name": "coupon.queue",
       "type": "com.site.domain.coupon.queue.CouponQueueProperties",
       "description": "선착순 대기열 설정"
@@ -27,6 +32,15 @@
     {
       "name": "coupon.queue.scheduler",
       "description": "대기열 워커 스케줄러 설정"
+    },
+    {
+      "name": "coupon.queue.polling",
+      "type": "com.site.domain.coupon.queue.CouponQueuePollingProperties",
+      "description": "대기열 상태 조회 간격 힌트(retryAfterMillis) 설정"
+    },
+    {
+      "name": "coupon.queue.stream.scheduler",
+      "description": "대기열 SSE 상태 전송 스케줄러 설정"
     },
     {
       "name": "admin.init",
@@ -118,6 +132,12 @@
       "description": "Outbox 스케줄러 실행 간격(ms)."
     },
     {
+      "name": "coupon.issue.direct-strategy",
+      "type": "com.site.domain.coupon.service.DirectIssueStrategy",
+      "defaultValue": "atomic-update",
+      "description": "즉시 발급의 동시성 제어 방식. atomic-update(원자적 조건부 UPDATE) 또는 distributed-lock(Redis 분산락)."
+    },
+    {
       "name": "coupon.queue.batch-size",
       "type": "java.lang.Long",
       "defaultValue": 50,
@@ -136,6 +156,12 @@
       "description": "꺼낸 회원을 처리 중으로 잡아 두는 시간. 지나도 결과가 없으면 다시 처리한다."
     },
     {
+      "name": "coupon.queue.max-busy-time",
+      "type": "java.time.Duration",
+      "defaultValue": "1s",
+      "description": "줄이 남아 있으면 쉬지 않고 다음 배치를 이어서 처리하되, 한 이벤트에 쓰는 최대 시간."
+    },
+    {
       "name": "coupon.queue.scheduler.enabled",
       "type": "java.lang.Boolean",
       "defaultValue": true,
@@ -146,6 +172,36 @@
       "type": "java.lang.Long",
       "defaultValue": 200,
       "description": "대기열 워커 실행 간격(ms). 이전 실행이 끝난 뒤부터 잰다."
+    },
+    {
+      "name": "coupon.queue.polling.min-interval",
+      "type": "java.time.Duration",
+      "defaultValue": "300ms",
+      "description": "다음 조회까지 최소 대기 시간 (처리 중이거나 다음 배치 순번)."
+    },
+    {
+      "name": "coupon.queue.polling.max-interval",
+      "type": "java.time.Duration",
+      "defaultValue": "3s",
+      "description": "다음 조회까지 최대 대기 시간 (뒤 순번)."
+    },
+    {
+      "name": "coupon.queue.polling.estimated-throughput-per-second",
+      "type": "java.lang.Long",
+      "defaultValue": 500,
+      "description": "워커가 1초에 발급하는 인원 추정치. 예상 대기 시간 계산에 쓴다."
+    },
+    {
+      "name": "coupon.queue.stream.scheduler.enabled",
+      "type": "java.lang.Boolean",
+      "defaultValue": true,
+      "description": "대기열 SSE 상태 전송 스케줄러 사용 여부. 테스트에서는 끈다."
+    },
+    {
+      "name": "coupon.queue.stream.scheduler.interval-millis",
+      "type": "java.lang.Long",
+      "defaultValue": 500,
+      "description": "SSE 로 연결된 사용자의 상태를 확인하는 간격(ms)."
     },
     {
       "name": "admin.init.email",

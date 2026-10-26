@@ -102,6 +102,45 @@ class CouponQueueTest @Autowired constructor(
     }
 
     @Test
+    fun `일괄 발급은 이미 받은 회원은 그대로 두고, 남은 수량만큼 앞사람부터 발급한 뒤 나머지는 소진으로 돌려준다`() {
+        val couponEventId = ongoingCouponEvent(totalQuantity = 3)
+        couponIssueService.issueWithAtomicUpdate(couponEventId, 1L, CouponIssueMode.QUEUE) // 1번은 이전 처리에서 이미 받았다
+
+        val result = couponIssueService.issueQueuedBatch(couponEventId, listOf(1L, 2L, 3L, 4L, 5L))
+
+        assertEquals(listOf(1L, 2L, 3L), result.issued)
+        assertEquals(listOf(4L, 5L), result.rejected)
+        assertEquals(ErrorCode.COUPON_SOLD_OUT, result.rejectReason)
+        assertEquals(3, requireNotNull(couponEventRepository.findById(couponEventId).orElse(null)).issuedQuantity)
+        assertEquals(3L, issuedCouponRepository.countByCouponEventId(couponEventId))
+    }
+
+    @Test
+    fun `줄이 남아 있으면 워커 한 번 호출로 꽉 찬 배치를 쉬지 않고 이어서 처리한다`() {
+        val couponEventId = ongoingCouponEvent(totalQuantity = 200)
+        (1L..150L).forEach { couponQueueService.enqueue(couponEventId, it) } // 배치 50명 × 3
+
+        couponQueueWorker.processAll()
+
+        assertEquals(150L, issuedCouponRepository.countByCouponEventId(couponEventId))
+        assertEquals(CouponQueueStatus.Done(ISSUED), couponQueueService.getStatus(couponEventId, 150L))
+    }
+
+    @Test
+    fun `워커 여러 대가 동시에 처리해도 수량을 넘지 않고, 모두가 결과를 받는다`() {
+        val couponEventId = ongoingCouponEvent(totalQuantity = 100)
+        val memberIds = (1L..300L).toList()
+        memberIds.forEach { couponQueueService.enqueue(couponEventId, it) }
+
+        // 서버 4대에서 워커가 동시에 도는 상황
+        runConcurrently(taskCount = 4, threadCount = 4) { repeat(10) { couponQueueWorker.processAll() } }
+
+        assertEquals(100L, issuedCouponRepository.countByCouponEventId(couponEventId))
+        val results = memberIds.map { couponQueueService.getStatus(couponEventId, it) }.groupingBy { it }.eachCount()
+        assertEquals(mapOf(CouponQueueStatus.Done(ISSUED) to 100, CouponQueueStatus.Done(SOLD_OUT) to 200), results)
+    }
+
+    @Test
     fun `시작 전 이벤트에는 줄을 설 수 없다`() {
         val couponEventId = couponEventRepository.save(
             couponEventFixture(startAt = serviceNow().plusDays(1), endAt = serviceNow().plusDays(2), issueMode = CouponIssueMode.QUEUE),
@@ -121,7 +160,7 @@ class CouponQueueTest @Autowired constructor(
         couponQueueStore.claimNext(couponEventId, count = 3, leaseUntilMillis = clock.millis() - 1)
         assertEquals(CouponQueueStatus.Processing, couponQueueService.getStatus(couponEventId, 1L))
         // 그중 1번은 DB 발급까지 끝내고 결과를 기록하기 직전에 죽었다
-        couponIssueService.issueWithAtomicUpdate(couponEventId, 1L)
+        couponIssueService.issueWithAtomicUpdate(couponEventId, 1L, CouponIssueMode.QUEUE)
 
         couponQueueWorker.processAll()
 

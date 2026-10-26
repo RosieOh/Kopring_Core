@@ -47,7 +47,7 @@ def num(value, fmt="{:.0f}") -> str:
     return "-" if value is None or value != value else fmt.format(value)  # NaN 은 "-"
 
 
-def main(out_dir: str, quantity: str) -> None:
+def main(out_dir: str, quantity: str, label: str) -> None:
     out = Path(out_dir)
     runs = [line.split() for line in (out / "runs.txt").read_text().splitlines() if line.strip()]
 
@@ -75,15 +75,18 @@ def main(out_dir: str, quantity: str) -> None:
                 f"| {num(server['queue_waiting_max'])} | {num(server['db_pending_max'])} | {num(server['tomcat_busy_max'])} |"
             )
 
-    print(f"### 즉시 발급 (분산락 + 사전 검사) — 쿠폰 {quantity}장\n")
-    print("| 동시 사용자 | 발급 | 소진 | 락 타임아웃 | 기타 실패 | 응답 중앙값 | 응답 p95 | 응답 최대 | 락 대기 p95 | DB 커넥션 대기 최대 | Tomcat 스레드 최대 |")
-    print("|---|---|---|---|---|---|---|---|---|---|---|")
-    print("\n".join(direct_rows))
-    print(f"\n### 대기열 — 쿠폰 {quantity}장\n")
-    print("| 동시 사용자 | 발급 | 소진 | 실패·시간 초과 | 등록 응답 p95 | 결과까지 중앙값 | 결과까지 p95 | 결과까지 최대 | 총 HTTP 요청 | 대기열 최대 | DB 커넥션 대기 최대 | Tomcat 스레드 최대 |")
-    print("|---|---|---|---|---|---|---|---|---|---|---|---|")
-    print("\n".join(queue_rows))
+    suffix = f" ({label})" if label else ""
+    if direct_rows:
+        print(f"### 즉시 발급{suffix} — 쿠폰 {quantity}장\n")
+        print("| 동시 사용자 | 발급 | 소진 | 락 타임아웃 | 기타 실패 | 응답 중앙값 | 응답 p95 | 응답 최대 | 락 대기 p95 | DB 커넥션 대기 최대 | Tomcat 스레드 최대 |")
+        print("|---|---|---|---|---|---|---|---|---|---|---|")
+        print("\n".join(direct_rows) + "\n")
+    if queue_rows:
+        print(f"### 대기열{suffix} — 쿠폰 {quantity}장\n")
+        print("| 동시 사용자 | 발급 | 소진 | 실패·시간 초과 | 등록 응답 p95 | 결과까지 중앙값 | 결과까지 p95 | 결과까지 최대 | 총 HTTP 요청 | 대기열 최대 | DB 커넥션 대기 최대 | Tomcat 스레드 최대 |")
+        print("|---|---|---|---|---|---|---|---|---|---|---|---|")
+        print("\n".join(queue_rows) + "\n")
 
 
 if __name__ == "__main__":
-    main(sys.argv[1], sys.argv[2] if len(sys.argv) > 2 else "?")
+    main(sys.argv[1], sys.argv[2] if len(sys.argv) > 2 else "?", sys.argv[3] if len(sys.argv) > 3 else "")

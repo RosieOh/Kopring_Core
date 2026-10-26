@@ -1,6 +1,7 @@
 package com.site.domain.notification
 
 import com.fasterxml.jackson.databind.ObjectMapper
+import com.site.domain.coupon.entity.CouponIssueMode
 import com.site.domain.coupon.event.CouponIssuedEvent
 import com.site.domain.coupon.repository.CouponEventRepository
 import com.site.domain.coupon.repository.IssuedCouponRepository
@@ -89,7 +90,7 @@ class NotificationOutboxTest @Autowired constructor(
 
         // 바깥 트랜잭션에 합류해서 발급(+ Outbox 기록)까지 한 뒤, 바깥 트랜잭션을 롤백시킨다
         transactionTemplate.executeWithoutResult { status ->
-            couponIssueService.issueWithAtomicUpdate(couponEventId, memberId)
+            couponIssueService.issueWithAtomicUpdate(couponEventId, memberId, CouponIssueMode.DIRECT)
             status.setRollbackOnly()
         }
 

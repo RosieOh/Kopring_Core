@@ -1,5 +1,6 @@
 package com.site.domain.coupon.service
 
+import com.site.domain.coupon.entity.CouponIssueMode
 import com.site.domain.coupon.entity.IssuedCoupon
 import com.site.domain.coupon.repository.CouponEventRepository
 import com.site.domain.coupon.repository.IssuedCouponRepository
@@ -13,6 +14,8 @@ import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.assertThrows
+import org.junit.jupiter.params.ParameterizedTest
+import org.junit.jupiter.params.provider.EnumSource
 import org.redisson.api.RedissonClient
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Autowired
@@ -26,13 +29,15 @@ import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * 100장짜리 이벤트에 300명이 동시에 발급을 요청한다. 동시성 제어 방식 네 가지를 같은 조건으로 비교한다.
+ * 운영 코드의 즉시 발급 입구(CouponIssueFacade)는 두 방식(원자적 UPDATE, 분산락) 모두 확인한다.
  * 실행 결과(성공 수, 실패 사유, 소요 시간)는 로그의 "동시 발급 결과" 줄에서 볼 수 있다.
  */
 @IntegrationTest
 class CouponIssueConcurrencyTest @Autowired constructor(
     private val couponIssueService: CouponIssueService,
     private val learningStrategies: LearningCouponIssueStrategies,
-    private val couponIssueFacade: CouponIssueFacade,
+    private val startedCouponEvents: StartedCouponEventCache,
+    private val metrics: CouponIssueMetrics,
     private val couponEventRepository: CouponEventRepository,
     private val issuedCouponRepository: IssuedCouponRepository,
     private val redissonClient: RedissonClient,
@@ -69,18 +74,22 @@ class CouponIssueConcurrencyTest @Autowired constructor(
 
     @Test
     fun `원자적 UPDATE - 정확히 100장만 발급된다`() {
-        assertExactlyTotalIssued(issueConcurrently("원자적 UPDATE", couponIssueService::issueWithAtomicUpdate))
+        assertExactlyTotalIssued(issueConcurrently("원자적 UPDATE", ::issueWithAtomicUpdate))
+    }
+
+    @ParameterizedTest
+    @EnumSource(DirectIssueStrategy::class)
+    fun `즉시 발급 입구(사전 검사 + 설정한 방식) - 정확히 100장만 발급된다`(strategy: DirectIssueStrategy) {
+        assertExactlyTotalIssued(issueConcurrently("사전 검사 + $strategy", facade(strategy)::issue))
     }
 
     @Test
-    fun `분산락 + 사전 검사 - 정확히 100장만 발급된다`() {
-        assertExactlyTotalIssued(issueConcurrently("분산락 + 사전 검사", couponIssueFacade::issue))
-    }
-
-    @Test
-    fun `사전 검사 덕분에 소진된 이벤트는 락을 기다리지 않고 바로 거절된다`() {
+    fun `한 번 소진을 확인한 뒤로는 락을 기다리지 않고 바로 거절된다`() {
+        val facade = facade(DirectIssueStrategy.DISTRIBUTED_LOCK)
         val couponEventId = couponEventRepository.save(couponEventFixture(totalQuantity = 1)).id
-        couponIssueFacade.issue(couponEventId, memberId = 1L)
+        facade.issue(couponEventId, memberId = 1L)
+        // 이 서버가 소진을 처음 확인하는 요청은 락 안에서 거절된다
+        assertEquals(ErrorCode.COUPON_SOLD_OUT, assertThrows<ServiceException> { facade.issue(couponEventId, memberId = 2L) }.errorCode)
 
         // 다른 누군가가 락을 오래 쥐고 있는 상황 (락 이름은 DistributedLockAspect 의 "lock:" + key)
         val lock = redissonClient.getLock("lock:coupon-event:$couponEventId")
@@ -88,7 +97,7 @@ class CouponIssueConcurrencyTest @Autowired constructor(
         try {
             // Redisson 락은 같은 스레드면 재진입되므로 반드시 다른 스레드에서 요청한다
             val errorCode = CompletableFuture.supplyAsync {
-                assertThrows<ServiceException> { couponIssueFacade.issue(couponEventId, memberId = 2L) }.errorCode
+                assertThrows<ServiceException> { facade.issue(couponEventId, memberId = 3L) }.errorCode
             }.get(10, TimeUnit.SECONDS)
 
             // 사전 검사가 없었다면 락을 5초(waitTime) 기다린 뒤 LOCK_ACQUISITION_FAILED 가 났을 것이다
@@ -102,7 +111,7 @@ class CouponIssueConcurrencyTest @Autowired constructor(
     fun `같은 회원이 동시에 여러 번 요청하면 unique 제약으로 1장만 발급되고, 실패한 요청의 수량 증가는 롤백된다`() {
         val result = issueConcurrently(
             label = "같은 회원 중복 요청",
-            issue = couponIssueService::issueWithAtomicUpdate,
+            issue = ::issueWithAtomicUpdate,
             requestCount = 20,
             memberIdOf = { SAME_MEMBER_ID },
         )
@@ -112,6 +121,12 @@ class CouponIssueConcurrencyTest @Autowired constructor(
         assertEquals(1, result.issuedQuantity)
         assertEquals(mapOf("ALREADY_ISSUED_COUPON" to 19), result.failReasons)
     }
+
+    private fun issueWithAtomicUpdate(couponEventId: Long, memberId: Long): IssuedCoupon =
+        couponIssueService.issueWithAtomicUpdate(couponEventId, memberId, CouponIssueMode.DIRECT)
+
+    private fun facade(strategy: DirectIssueStrategy) =
+        CouponIssueFacade(startedCouponEvents, couponIssueService, CouponIssueProperties(directStrategy = strategy), metrics)
 
     private fun assertExactlyTotalIssued(result: IssueResult) {
         assertEquals(TOTAL_QUANTITY, result.successCount)
